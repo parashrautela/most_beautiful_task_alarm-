@@ -1,0 +1,455 @@
+import re
+
+filepath = "/Users/parashrautela/Desktop/TaskAlarm/app/src/main/java/com/example/myapplication/NewTaskSheet.kt"
+with open(filepath, "r") as f:
+    content = f.read()
+
+# Let's write the original code from before this turn started.
+original = """package com.example.myapplication
+
+import android.view.HapticFeedbackConstants
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
+
+// ─── Custom Fonts ───────────────────────────────────────────────────────────
+private val DentonFontFamily = FontFamily(
+    Font(R.font.denton_test_medium, FontWeight.Medium)
+)
+
+private val SatoshiFontFamily = FontFamily(
+    Font(R.font.satoshi_medium, FontWeight.Medium)
+)
+
+// ─── Figma Design Tokens ────────────────────────────────────────────────────
+
+// Colors (exact hex from Figma)
+private val SheetBg = Color.White
+private val HeadingColor = Color(0xFF3A3A3A)       // "New Task" heading
+private val LabelColor = Color.Black               // TITLE, DESCRIPTION, PRIORITY labels
+private val PlaceholderColor = Color(0xFFB5B5B5)    // "Enter title", description, date/time
+private val DescBorderFilled = Color(0xFF777777)    // Left border when description has text
+private val DescBorderEmpty = Color(0xFFD9D9D9)     // Left border when description is empty
+private val PriorityLabelColor = Color(0xFF3A3A3A)  // Important, Critical, Flexible text
+private val CtaBgColor = Color(0xFFD0D0D0)          // Slide-to-set pill background
+private val CtaTextActive = Color(0xFF3A3A3A)       // "LOCK IT IN" text
+private val CtaTextInactive = Color(0xFFB4B4B4)     // "SLIDE TO SET" text
+
+// Priority swatch gradients (from Figma: gradient top → bottom)
+private val ImportantGradient = Brush.verticalGradient(
+    colors = listOf(Color(0xFF00E6AC), Color(0xFF005A43)),
+    startY = 0f,
+    endY = Float.POSITIVE_INFINITY,
+)
+private val CriticalGradient = Brush.verticalGradient(
+    colors = listOf(Color(0xFFEA5457), Color(0xFF440708)),
+    startY = 0f,
+    endY = Float.POSITIVE_INFINITY,
+)
+private val FlexibleGradient = Brush.verticalGradient(
+    colors = listOf(Color(0xFF00A9E6), Color(0xFF00105A)),
+    startY = 0f,
+    endY = Float.POSITIVE_INFINITY,
+)
+
+// Selection border
+private val SelectedBorder = Color(0xFF00E6AC)
+private val SwatchBorder = Color(0xFF01634A)
+
+// ─── Typography tokens ──────────────────────────────────────────────────────
+// Figma uses "Satoshi Variable Medium" → closest system sans-serif
+// Figma uses "Denton Test Medium" for title input → serif italic-like
+
+// Font sizes from Figma
+private val HeadingSize = 32.sp           // "New Task"
+private val LabelSize = 12.sp            // TITLE, DESCRIPTION, PRIORITY, swatch labels
+private val TitleInputSize = 48.sp       // "Enter title" placeholder
+private val DescriptionSize = 16.sp      // Description text
+private val DateTimeSize = 32.sp         // "Select date" / "Select Time"
+private val CtaTextSize = 12.sp          // "LOCK IT IN" / "SLIDE TO SET"
+
+// Letter spacing from Figma
+private val HeadingTracking = (-0.96).sp
+private val LabelTracking = (-0.36).sp
+private val TitleInputTracking = (-1.44).sp
+private val DescriptionTracking = (-0.48).sp
+
+// ─── Dimension tokens ───────────────────────────────────────────────────────
+// Corner radius
+private val SheetCornerRadius = 24.dp
+
+// Drag handle
+private val DragHandleWidth = 48.dp
+private val DragHandleHeight = 4.dp
+
+// Description left bar
+private val DescBarWidth = 4.dp
+private val DescBarHeight = 100.dp
+
+// Priority swatch size
+private val SwatchSize = 44.dp
+
+// CTA pill
+private val CtaHeight = 68.dp
+private val CtaCornerRadius = 32.dp
+private val CtaCircleSize = 60.dp
+private val CtaCircleOffset = 4.dp
+
+// ─── Composable ─────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NewTaskSheet(onDismiss: () -> Unit) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SheetBg,
+        shape = RoundedCornerShape(topStart = SheetCornerRadius, topEnd = SheetCornerRadius),
+        dragHandle = null,      // we draw our own
+        tonalElevation = 0.dp,
+    ) {
+        NewTaskSheetContent(onDismiss = onDismiss)
+    }
+}
+
+@Composable
+private fun NewTaskSheetContent(onDismiss: () -> Unit) {
+    var title by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var selectedPriority by remember { mutableIntStateOf(0) }  // 0=Important, 1=Critical, 2=Flexible
+
+    val scrollState = rememberScrollState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(scrollState)
+            .padding(bottom = 22.dp),
+    ) {
+        // ── Drag Handle ──────────────────────────────────────────────────
+        Spacer(modifier = Modifier.height(12.dp))
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .width(DragHandleWidth)
+                .height(DragHandleHeight)
+                .clip(RoundedCornerShape(50))
+                .background(Color(0xFFD0D0D0)),
+        )
+
+        Spacer(modifier = Modifier.height(27.dp))
+
+        // ── "New Task" Heading ───────────────────────────────────────────
+        Text(
+            text = "New Task",
+            fontFamily = SatoshiFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = HeadingSize,
+            color = HeadingColor,
+            letterSpacing = HeadingTracking,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        )
+
+        Spacer(modifier = Modifier.height(50.dp))
+
+        // ── TITLE Label ──────────────────────────────────────────────────
+        Text(
+            text = "TITLE",
+            fontFamily = SatoshiFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = LabelSize,
+            color = LabelColor,
+            letterSpacing = LabelTracking,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // ── Title Input (large serif) ────────────────────────────────────
+        BasicTextField(
+            value = title,
+            onValueChange = { if (it.length <= 80) title = it },
+            textStyle = TextStyle(
+                fontFamily = DentonFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = TitleInputSize,
+                brush = Brush.verticalGradient(
+                    colors = listOf(Color(0xFF555555), Color(0xFF999999))
+                ),
+                shadow = androidx.compose.ui.graphics.Shadow(
+                    color = Color.White,
+                    offset = androidx.compose.ui.geometry.Offset(0f, 3f),
+                    blurRadius = 1f
+                ),
+                letterSpacing = TitleInputTracking,
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp),
+            singleLine = true,
+            decorationBox = { innerTextField ->
+                Box {
+                    if (title.isEmpty()) {
+                        // Figma: #b5b5b5 with inner shadow inset letterpress trick
+                        Text(
+                            text = "Enter title",
+                            fontFamily = DentonFontFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = TitleInputSize,
+                            style = TextStyle(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(Color(0xFF888888), Color(0xFFCCCCCC))
+                                ),
+                                shadow = androidx.compose.ui.graphics.Shadow(
+                                    color = Color.White,
+                                    offset = androidx.compose.ui.geometry.Offset(0f, 4f),
+                                    blurRadius = 1f
+                                )
+                            ),
+                            letterSpacing = TitleInputTracking,
+                        )
+                    }
+                    innerTextField()
+                }
+            },
+        )
+
+        Spacer(modifier = Modifier.height(40.dp))
+
+        // ── DESCRIPTION Label ────────────────────────────────────────────
+        Text(
+            text = "DESCRIPTION",
+            fontFamily = SatoshiFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = LabelSize,
+            color = LabelColor,
+            letterSpacing = LabelTracking,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // ── Description Input with left accent bar ───────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp),
+        ) {
+            // Left vertical accent bar with inset groove effect
+            Box(
+                modifier = Modifier
+                    .width(6.dp)
+                    .height(DescBarHeight)
+                    .shadow(
+                        elevation = 2.dp,
+                        shape = RoundedCornerShape(3.dp),
+                        spotColor = Color.Black.copy(alpha = 0.2f),
+                        clip = false,
+                    )
+                    .background(
+                        brush = Brush.horizontalGradient(
+                            colors = if (description.isNotEmpty()) {
+                                listOf(Color(0xFF1E3A8A), Color(0xFF3B82F6), Color(0xFF93C5FD))
+                            } else {
+                                listOf(Color(0xFF9E9E9E), Color(0xFFE0E0E0), Color(0xFFFFFFFF))
+                            }
+                        ),
+                        shape = RoundedCornerShape(3.dp),
+                    ),
+            )
+
+            Spacer(modifier = Modifier.width(13.dp))
+
+            BasicTextField(
+                value = description,
+                onValueChange = { if (it.length <= 200) description = it },
+                textStyle = TextStyle(
+                    fontFamily = SatoshiFontFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = DescriptionSize,
+                    color = PlaceholderColor,
+                    letterSpacing = DescriptionTracking,
+                    lineHeight = 22.sp,
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = DescBarHeight),
+                decorationBox = { innerTextField ->
+                    Box {
+                        if (description.isEmpty()) {
+                            Text(
+                                text = "Description (optional)",
+                                fontFamily = SatoshiFontFamily,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = DescriptionSize,
+                                color = PlaceholderColor,
+                                letterSpacing = DescriptionTracking,
+                            )
+                        }
+                        innerTextField()
+                    }
+                },
+            )
+        }
+
+        Spacer(modifier = Modifier.height(40.dp))
+
+        // ── Select Date / Select Time (side by side, large serif) ────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp),
+        ) {
+            Text(
+                text = "Select date",
+                fontFamily = SatoshiFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = DateTimeSize,
+                color = PlaceholderColor,
+                letterSpacing = HeadingTracking,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "Select Time",
+                fontFamily = SatoshiFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = DateTimeSize,
+                color = PlaceholderColor,
+                letterSpacing = HeadingTracking,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(40.dp))
+
+        // ── PRIORITY Label ───────────────────────────────────────────────
+        Text(
+            text = "PRIORITY",
+            fontFamily = SatoshiFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = LabelSize,
+            color = LabelColor,
+            letterSpacing = LabelTracking,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // ── Priority Swatches ────────────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            val priorities = listOf(
+                Triple("Important", ImportantGradient, 0),
+                Triple("Critical", CriticalGradient, 1),
+                Triple("Flexible", FlexibleGradient, 2),
+            )
+
+            priorities.forEach { (label, gradient, index) ->
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .width(80.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(SwatchSize)
+                            .then(
+                                if (selectedPriority == index) {
+                                    Modifier.border(
+                                        width = 1.dp,
+                                        color = SelectedBorder,
+                                        shape = RoundedCornerShape(0.dp),
+                                    )
+                                } else {
+                                    Modifier.border(
+                                        width = 0.2.dp,
+                                        color = SwatchBorder,
+                                        shape = RoundedCornerShape(0.dp),
+                                    )
+                                }
+                            )
+                            .background(gradient)
+                            .clickable { selectedPriority = index },
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = label,
+                        fontFamily = SatoshiFontFamily,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = LabelSize,
+                        color = PriorityLabelColor,
+                        letterSpacing = LabelTracking,
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        // ── Slide-to-Set CTA ─────────────────────────────────────────────
+        SlideToSetButton(
+            onSlideComplete = onDismiss,
+            modifier = Modifier
+                .padding(horizontal = 22.dp),
+        )
+    }
+}
+
+// ─── Slide-to-Set Button ────────────────────────────────────────────────────
+
+@Composable
+private fun SlideToSetButton(
+    onSlideComplete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+"""
+
+with open(filepath, "r") as f:
+    current = f.read()
+
+idx = current.find("@Composable\nprivate fun SlideToSetButton")
+if idx != -1:
+    rest = current[idx:]
+    with open(filepath, "w") as f:
+        f.write(original + rest)
+    print("Reverted successfully")
+else:
+    print("Failed to find split point")
