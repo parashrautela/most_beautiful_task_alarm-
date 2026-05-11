@@ -6,6 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,8 +16,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -121,17 +127,93 @@ fun TaskAlarmHomeScreen() {
                 )
             }
         }
-        FloatingActionButton(
-            onClick = { showSheet = true },
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(24.dp)
-                .size(60.dp),
-            shape = RoundedCornerShape(16.dp),
-            containerColor = FabGreen,
-            contentColor = Color.White,
+                .size(60.dp)
+                // 1. Exact outer drop shadow from Figma: dy=4, stdDev=1.95, color=rgba(124,124,124,0.17)
+                .drawBehind {
+                    val d = this.density
+                    drawIntoCanvas { canvas ->
+                        val paint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.TRANSPARENT
+                            setShadowLayer(
+                                1.95f * d, // blur
+                                0f * d,    // dx
+                                4f * d,    // dy
+                                android.graphics.Color.argb((0.17f * 255).toInt(), 124, 124, 124)
+                            )
+                        }
+                        canvas.nativeCanvas.drawCircle(size.width / 2, size.height / 2, size.width / 2, paint)
+                    }
+                }
+                // 2. Background fill: white to #F1F2F3
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color.White, Color(0xFFF1F2F3))
+                    ),
+                    shape = CircleShape
+                )
+                // 3. Border stroke: 0.8 width, linear gradient
+                .border(
+                    width = 0.8.dp,
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color(0xFF969696), Color(0xFFF8F8F8).copy(alpha = 0.69f)),
+                        start = androidx.compose.ui.geometry.Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+                        end = androidx.compose.ui.geometry.Offset(0f, 0f)
+                    ),
+                    shape = CircleShape
+                )
+                // 4. Inner shadow on the background: dx=4, dy=4, blur=2.5, spread=3, color=rgba(145,145,145,0.25)
+                .innerShadow(
+                    shape = CircleShape,
+                    color = Color(145, 145, 145, (0.25f * 255).toInt()),
+                    blur = 2.5.dp,
+                    offsetX = 4.dp,
+                    offsetY = 4.dp,
+                    spread = 3.dp
+                )
+                .clip(CircleShape)
+                .clickable { showSheet = true },
+            contentAlignment = Alignment.Center
         ) {
-            Text("+", fontSize = 28.sp, color = Color.White, fontWeight = FontWeight.Light)
+            // 5. The exact Plus icon stroke
+            androidx.compose.foundation.Canvas(modifier = Modifier.size(60.dp)) {
+                val strokeWidth = 2.dp.toPx()
+                val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(21f.dp.toPx(), 30f.dp.toPx())
+                    lineTo(39f.dp.toPx(), 30f.dp.toPx())
+                    moveTo(30f.dp.toPx(), 21f.dp.toPx())
+                    lineTo(30f.dp.toPx(), 39f.dp.toPx())
+                }
+                
+                // Base black stroke
+                drawPath(
+                    path = path,
+                    color = Color.Black,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = strokeWidth,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                        join = androidx.compose.ui.graphics.StrokeJoin.Round
+                    )
+                )
+                // Tiny white inner shadow highlight (dx=0.4, dy=0.4, blur=0.25, white 0.43)
+                val highlightOffset = 0.4f.dp.toPx()
+                withTransform({
+                    translate(highlightOffset, highlightOffset)
+                }) {
+                    drawPath(
+                        path = path,
+                        color = Color.White.copy(alpha = 0.43f),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                            width = strokeWidth * 0.5f,
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                            join = androidx.compose.ui.graphics.StrokeJoin.Round
+                        )
+                    )
+                }
+            }
         }
         if (showSheet) {
             NewTaskSheet(

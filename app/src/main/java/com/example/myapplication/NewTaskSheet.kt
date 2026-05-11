@@ -3,17 +3,21 @@ package com.example.myapplication
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,6 +31,8 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -35,11 +41,23 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.graphicsLayer
+
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import java.util.Calendar
+import java.util.Locale
 
 // ─── Custom Inner Shadow Modifier ───────────────────────────────────────────
 fun Modifier.innerShadow(
@@ -103,9 +121,9 @@ private val PlaceholderColor = Color(0xFFB5B5B5)    // "Enter title", descriptio
 private val DescBorderFilled = Color(0xFF777777)    // Left border when description has text
 private val DescBorderEmpty = Color(0xFFD9D9D9)     // Left border when description is empty
 private val PriorityLabelColor = Color(0xFF3A3A3A)  // Important, Critical, Flexible text
-private val CtaBgColor = Color(0xFFD0D0D0)          // Slide-to-set pill background
+private val CtaBgColor = Color(0xFFE0E0E0)          // Lighter, more silver track
 private val CtaTextActive = Color(0xFF3A3A3A)       // "LOCK IT IN" text
-private val CtaTextInactive = Color(0xFFB4B4B4)     // "SLIDE TO SET" text
+private val CtaTextInactive = Color(0xFF555555)     // More visible gray text
 
 // Priority swatch gradients (from Figma: gradient top → bottom)
 private val ImportantGradient = Brush.verticalGradient(
@@ -125,8 +143,16 @@ private val FlexibleGradient = Brush.verticalGradient(
 )
 
 // Selection border
-private val SelectedBorder = Color(0xFF00E6AC)
-private val SwatchBorder = Color(0xFF01634A)
+private val SelectedBorderGreen = Color(0xFF00C896)
+private val SelectedBorderRed   = Color(0xFFEF4444)
+private val SelectedBorderBlue  = Color(0xFF2563EB)
+
+private data class PriorityItem(
+    val label: String,
+    val gradient: Brush,
+    val borderColor: Color,
+    val index: Int
+)
 
 // ─── Typography tokens ──────────────────────────────────────────────────────
 // Figma uses "Satoshi Variable Medium" → closest system sans-serif
@@ -193,12 +219,32 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
     var selectedPriority by remember { mutableIntStateOf(0) }  // 0=Important, 1=Critical, 2=Flexible
 
     val scrollState = rememberScrollState()
+    val density = LocalDensity.current.density
+
+    // Initial Date/Time Logic (Today + 30 mins)
+    val initialCalendar = remember {
+        Calendar.getInstance().apply {
+            add(Calendar.MINUTE, 30)
+        }
+    }
+
+    var selectedDay by remember { mutableIntStateOf(initialCalendar.get(Calendar.DAY_OF_MONTH)) }
+    var selectedMonth by remember { 
+        mutableStateOf(initialCalendar.getDisplayName(Calendar.MONTH, Calendar.SHORT, Locale.getDefault())?.lowercase() ?: "may") 
+    }
+    var selectedYear by remember { mutableIntStateOf(initialCalendar.get(Calendar.YEAR)) }
+
+    var selectedHour by remember { 
+        val h = initialCalendar.get(Calendar.HOUR)
+        mutableIntStateOf(if (h == 0) 12 else h)
+    }
+    var selectedMinute by remember { mutableIntStateOf(initialCalendar.get(Calendar.MINUTE)) }
+    var amPm by remember { mutableStateOf(if (initialCalendar.get(Calendar.AM_PM) == Calendar.AM) "AM" else "PM") }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .verticalScroll(scrollState)
-            .padding(bottom = 22.dp),
+            .verticalScroll(scrollState),
     ) {
         // ── Drag Handle ──────────────────────────────────────────────────
         Spacer(modifier = Modifier.height(12.dp))
@@ -211,7 +257,7 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
                 .background(Color(0xFFD0D0D0)),
         )
 
-        Spacer(modifier = Modifier.height(27.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         // ── "New Task" Heading ───────────────────────────────────────────
         Text(
@@ -224,7 +270,7 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
             modifier = Modifier.padding(horizontal = 32.dp),
         )
 
-        Spacer(modifier = Modifier.height(50.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
         // ── TITLE Label ──────────────────────────────────────────────────
         Text(
@@ -237,7 +283,7 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
             modifier = Modifier.padding(horizontal = 32.dp),
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         // ── Title Input (large serif) ────────────────────────────────────
         BasicTextField(
@@ -248,12 +294,15 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
                 fontWeight = FontWeight.Medium,
                 fontSize = TitleInputSize,
                 brush = Brush.verticalGradient(
-                    colors = listOf(Color(0xFF555555), Color(0xFF999999))
+                    0.0f to Color.White,
+                    0.1f to Color.Black,
+                    startY = 0f,
+                    endY = 40f
                 ),
                 shadow = androidx.compose.ui.graphics.Shadow(
-                    color = Color.White,
-                    offset = androidx.compose.ui.geometry.Offset(0f, 3f),
-                    blurRadius = 1f
+                    color = Color(47, 47, 47, (0.34f * 255).toInt()),
+                    offset = androidx.compose.ui.geometry.Offset(0f, 4f),
+                    blurRadius = 2.5f
                 ),
                 letterSpacing = TitleInputTracking,
             ),
@@ -261,34 +310,44 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
                 .fillMaxWidth()
                 .padding(horizontal = 32.dp),
             singleLine = true,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
             decorationBox = { innerTextField ->
                 Box {
                     if (title.isEmpty()) {
-                        // Figma: #b5b5b5 with inner shadow inset letterpress trick
-                        Text(
-                            text = "Enter title",
-                            fontFamily = DentonFontFamily,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = TitleInputSize,
-                            style = TextStyle(
-                                brush = Brush.verticalGradient(
-                                    colors = listOf(Color(0xFF888888), Color(0xFFCCCCCC))
+                        Box {
+                            // Dark top-inner shadow
+                            Text(
+                                text = "Enter title",
+                                fontFamily = DentonFontFamily,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = TitleInputSize,
+                                color = Color.Transparent,
+                                style = TextStyle(
+                                    shadow = androidx.compose.ui.graphics.Shadow(
+                                        color = Color.Black.copy(alpha = 0.25f),
+                                        offset = androidx.compose.ui.geometry.Offset(0f, -2f),
+                                        blurRadius = 1.5f
+                                    )
                                 ),
-                                shadow = androidx.compose.ui.graphics.Shadow(
-                                    color = Color.White,
-                                    offset = androidx.compose.ui.geometry.Offset(0f, 4f),
-                                    blurRadius = 1f
-                                )
-                            ),
-                            letterSpacing = TitleInputTracking,
-                        )
+                                letterSpacing = TitleInputTracking,
+                            )
+                            // Base text
+                            Text(
+                                text = "Enter title",
+                                fontFamily = DentonFontFamily,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = TitleInputSize,
+                                color = Color(0xFFB5B5B5),
+                                letterSpacing = TitleInputTracking,
+                            )
+                        }
                     }
                     innerTextField()
                 }
             },
         )
 
-        Spacer(modifier = Modifier.height(40.dp))
+        Spacer(modifier = Modifier.height(32.dp))
 
         // ── DESCRIPTION Label ────────────────────────────────────────────
         Text(
@@ -301,7 +360,7 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
             modifier = Modifier.padding(horizontal = 32.dp),
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         // ── Description Input with left accent bar ───────────────────────
         Row(
@@ -320,7 +379,7 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
                         spotColor = Color.Black.copy(alpha = 0.25f),
                         clip = false,
                     )
-                    .background(Color(0xFF777777), barShape)
+                    .background(if (description.isEmpty()) DescBorderEmpty else Color(0xFF3A3A3A), barShape)
                     .innerShadow(
                         shape = barShape,
                         color = Color.White.copy(alpha = 0.45f),
@@ -339,7 +398,7 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
                     fontFamily = SatoshiFontFamily,
                     fontWeight = FontWeight.Medium,
                     fontSize = DescriptionSize,
-                    color = PlaceholderColor,
+                    color = Color(0xFF3A3A3A),
                     letterSpacing = DescriptionTracking,
                     lineHeight = 22.sp,
                 ),
@@ -350,12 +409,13 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
                     Box {
                         if (description.isEmpty()) {
                             Text(
-                                text = "Description (optional)",
+                                text = "I have to review some of the entries from the recent hiring drive and work accordingly in the dropping review in some of the clients works which the team have done",
                                 fontFamily = SatoshiFontFamily,
                                 fontWeight = FontWeight.Medium,
                                 fontSize = DescriptionSize,
                                 color = PlaceholderColor,
                                 letterSpacing = DescriptionTracking,
+                                lineHeight = 22.sp,
                             )
                         }
                         innerTextField()
@@ -364,34 +424,126 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
             )
         }
 
-        Spacer(modifier = Modifier.height(40.dp))
+        Spacer(modifier = Modifier.height(32.dp))
 
         // ── Select Date / Select Time (side by side, large serif) ────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 32.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = "Select date",
-                fontFamily = SatoshiFontFamily,
-                fontWeight = FontWeight.Medium,
-                fontSize = DateTimeSize,
-                color = PlaceholderColor,
-                letterSpacing = HeadingTracking,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = "Select Time",
-                fontFamily = SatoshiFontFamily,
-                fontWeight = FontWeight.Medium,
-                fontSize = DateTimeSize,
-                color = PlaceholderColor,
-                letterSpacing = HeadingTracking,
-            )
+            // Date Display
+            Row(
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Text(
+                    text = selectedDay.toString(),
+                    fontFamily = DentonFontFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 48.sp,
+                    color = Color.Black,
+                    style = TextStyle(
+                        shadow = androidx.compose.ui.graphics.Shadow(
+                            color = Color(47, 47, 47, (0.34f * 255).toInt()),
+                            offset = androidx.compose.ui.geometry.Offset(0f, 4f),
+                            blurRadius = 2.5f
+                        )
+                    ),
+                    letterSpacing = (-1.44).sp,
+                    modifier = Modifier.alignByBaseline()
+                )
+                // Inner Row for Suffix + Icon
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    modifier = Modifier.padding(start = 4.dp)
+                ) {
+                    Text(
+                        text = "/$selectedMonth/$selectedYear",
+                        fontFamily = DentonFontFamily,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        color = Color(0xFF3A3A3A),
+                        style = TextStyle(
+                            shadow = androidx.compose.ui.graphics.Shadow(
+                                color = Color(47, 47, 47, (0.34f * 255).toInt()),
+                                offset = androidx.compose.ui.geometry.Offset(0f, 0f),
+                                blurRadius = 0.3f
+                            )
+                        ),
+                        letterSpacing = (-0.42).sp,
+                        modifier = Modifier.alignByBaseline()
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    // Figma Exported Edit Icon
+                    Icon(
+                        painter = painterResource(id = R.drawable.edit_icon),
+                        contentDescription = "Edit Date",
+                        modifier = Modifier
+                            .size(26.dp)
+                            .padding(bottom = 6.dp),
+                        tint = Color.Unspecified
+                    )
+                }
+            }
+
+            // Time Display
+            Row(
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Text(
+                    text = String.format("%02d:%02d", selectedHour, selectedMinute),
+                    fontFamily = DentonFontFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 48.sp,
+                    color = Color.Black,
+                    style = TextStyle(
+                        shadow = androidx.compose.ui.graphics.Shadow(
+                            color = Color(47, 47, 47, (0.34f * 255).toInt()),
+                            offset = androidx.compose.ui.geometry.Offset(0f, 4f),
+                            blurRadius = 2.5f
+                        )
+                    ),
+                    letterSpacing = (-1.44).sp,
+                    modifier = Modifier.alignByBaseline()
+                )
+                // Inner Row for Suffix + Icon
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    modifier = Modifier.padding(start = 2.dp)
+                ) {
+                    Text(
+                        text = " $amPm",
+                        fontFamily = DentonFontFamily,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 15.sp,
+                        color = Color.Black,
+                        style = TextStyle(
+                            shadow = androidx.compose.ui.graphics.Shadow(
+                                color = Color(47, 47, 47, (0.34f * 255).toInt()),
+                                offset = androidx.compose.ui.geometry.Offset(0f, 0f),
+                                blurRadius = 0.3f
+                            )
+                        ),
+                        letterSpacing = (-0.45).sp,
+                        modifier = Modifier.alignByBaseline()
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    // Figma Exported Edit Icon
+                    Icon(
+                        painter = painterResource(id = R.drawable.edit_icon),
+                        contentDescription = "Edit Time",
+                        modifier = Modifier
+                            .size(26.dp)
+                            .padding(bottom = 6.dp),
+                        tint = Color.Unspecified
+                    )
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.height(40.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
         // ── PRIORITY Label ───────────────────────────────────────────────
         Text(
@@ -404,7 +556,7 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
             modifier = Modifier.padding(horizontal = 32.dp),
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // ── Priority Swatches ────────────────────────────────────────────
         Row(
@@ -414,20 +566,24 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             val priorities = listOf(
-                Triple("Important", ImportantGradient, 0),
-                Triple("Critical", CriticalGradient, 1),
-                Triple("Flexible", FlexibleGradient, 2),
+                PriorityItem("Important", ImportantGradient, SelectedBorderGreen, 0),
+                PriorityItem("Critical", CriticalGradient, SelectedBorderRed, 1),
+                PriorityItem("Flexible", FlexibleGradient, SelectedBorderBlue, 2),
             )
 
-            priorities.forEach { (label, gradient, index) ->
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
+            priorities.forEach { item ->
+                Row(
+                    verticalAlignment = Alignment.Bottom,
                     modifier = Modifier
-                        .width(80.dp)
-                        .clickable { selectedPriority = index },
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { selectedPriority = item.index },
                 ) {
-                    val isSelected = selectedPriority == index
+                    val isSelected = selectedPriority == item.index
                     val swatchShape = RoundedCornerShape(0.dp)
+                    
+                    // Outer Frame for Selected State
                     Box(
                         modifier = Modifier
                             .size(SwatchSize)
@@ -435,61 +591,133 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
                                 if (isSelected) {
                                     Modifier.border(
                                         width = 1.dp,
-                                        color = SelectedBorder,
-                                        shape = swatchShape,
+                                        brush = item.gradient,
+                                        shape = swatchShape
                                     )
-                                } else {
-                                    Modifier.border(
-                                        width = 0.2.dp,
-                                        color = SwatchBorder,
-                                        shape = swatchShape,
-                                    )
-                                }
-                            )
-                            .background(gradient)
-                            .innerShadow(
-                                shape = swatchShape,
-                                color = Color.Black.copy(alpha = 0.25f),
-                                blur = 4.dp,
-                                offsetX = 0.dp,
-                                offsetY = (-2).dp
-                            )
-                            .innerShadow(
-                                shape = swatchShape,
-                                color = Color.White.copy(alpha = 0.8f),
-                                blur = 1.9.dp,
-                                offsetX = 1.dp,
-                                offsetY = 1.dp
-                            )
-                    )
+                                } else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // The Swatch (Nested if selected)
+                        Box(
+                            modifier = Modifier
+                                .then(
+                                    if (isSelected) Modifier.padding(4.dp).fillMaxSize()
+                                    else Modifier.size(SwatchSize)
+                                )
+                                .background(item.gradient)
+                                .innerShadow(
+                                    shape = swatchShape,
+                                    color = Color.Black.copy(alpha = 0.25f),
+                                    blur = 4.dp,
+                                    offsetX = 0.dp,
+                                    offsetY = (-2).dp
+                                )
+                                .innerShadow(
+                                    shape = swatchShape,
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    blur = 1.9.dp,
+                                    offsetX = 1.dp,
+                                    offsetY = 1.dp
+                                )
+                        )
+                    }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     Text(
-                        text = label,
+                        text = item.label,
                         fontFamily = SatoshiFontFamily,
                         fontWeight = FontWeight.Medium,
                         fontSize = LabelSize,
                         color = PriorityLabelColor,
                         letterSpacing = LabelTracking,
+                        modifier = Modifier
+                            .offset(x = 2.dp, y = 2.dp)
+                            .padding(bottom = 0.dp)
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(36.dp))
 
         // ── Slide-to-Set CTA ─────────────────────────────────────────────
         SlideToSetButton(
             onSlideComplete = onDismiss,
             modifier = Modifier
-                .padding(horizontal = 22.dp),
+                .padding(horizontal = 22.dp)
+                .padding(bottom = 32.dp),
         )
     }
 }
 
-// ─── Slide-to-Set Button ────────────────────────────────────────────────────
+// ─── Laurel Wreath Painter ──────────────────────────────────────────────────
 
+@Composable
+private fun LaurelWreath(isLeft: Boolean) {
+    Canvas(modifier = Modifier.size(width = 20.dp, height = 32.dp)) {
+        val color = Color(0xFFD4AF37) // Gold
+        val strokeWidth = 1.2.dp.toPx()
+        
+        // Main stem
+        val stemPath = Path().apply {
+            if (isLeft) {
+                moveTo(size.width * 0.9f, size.height * 0.9f)
+                quadraticTo(
+                    size.width * 0.1f, size.height * 0.5f,
+                    size.width * 0.9f, size.height * 0.1f
+                )
+            } else {
+                moveTo(size.width * 0.1f, size.height * 0.9f)
+                quadraticTo(
+                    size.width * 0.9f, size.height * 0.5f,
+                    size.width * 0.1f, size.height * 0.1f
+                )
+            }
+        }
+        drawPath(stemPath, color, style = Stroke(width = strokeWidth, cap = StrokeCap.Round))
+        
+        // Leaf paths
+        val leafCount = 6
+        for (i in 0 until leafCount) {
+            val fraction = i.toFloat() / (leafCount - 1)
+            val y = size.height * (0.85f - fraction * 0.75f)
+            
+            // Calculate point on stem curve
+            val t = 0.9f - fraction * 0.8f
+            val stemX = if (isLeft) {
+                // Quadratic bezier: (1-t)^2*P0 + 2(1-t)t*P1 + t^2*P2
+                (1-t)*(1-t)*(size.width * 0.9f) + 2*(1-t)*t*(size.width * 0.1f) + t*t*(size.width * 0.9f)
+            } else {
+                (1-t)*(1-t)*(size.width * 0.1f) + 2*(1-t)*t*(size.width * 0.9f) + t*t*(size.width * 0.1f)
+            }
+            
+            val leafWidth = 6.dp.toPx()
+            val leafHeight = 3.dp.toPx()
+            val angle = if (isLeft) -30f else 30f
+            
+            drawIntoCanvas { canvas ->
+                canvas.save()
+                canvas.translate(stemX, y)
+                canvas.rotate(angle)
+                
+                val leafPath = Path().apply {
+                    moveTo(0f, 0f)
+                    quadraticTo(leafWidth/2, -leafHeight, leafWidth, 0f)
+                    quadraticTo(leafWidth/2, leafHeight, 0f, 0f)
+                }
+                canvas.drawPath(leafPath, Paint().apply { 
+                    this.color = color 
+                    this.isAntiAlias = true
+                })
+                canvas.restore()
+            }
+        }
+    }
+}
+
+// ─── Slide-to-Set Button ────────────────────────────────────────────────────
 
 @Composable
 private fun SlideToSetButton(
@@ -537,46 +765,39 @@ private fun SlideToSetButton(
     var pillWidthPx by remember { mutableFloatStateOf(0f) }
     val maxOffset by remember { derivedStateOf { (pillWidthPx - circleTotalPx).coerceAtLeast(0f) } }
 
-    var offsetX by remember { mutableFloatStateOf(0f) }
     var isComplete by remember { mutableStateOf(false) }
     var isDragging by remember { mutableStateOf(false) }
     var lastMilestone by remember { mutableIntStateOf(0) }
-    // Track cumulative travel for continuous buzz throttling
     var travelSinceLastBuzz by remember { mutableFloatStateOf(0f) }
 
-    // Animate: during drag → instant follow; on release → spring back or snap to end
-    val animatedOffset by animateFloatAsState(
-        targetValue = when {
-            isDragging -> offsetX        // follow finger instantly
-            isComplete -> maxOffset      // snap to end
-            else -> 0f                   // spring back to start
-        },
-        animationSpec = if (isDragging) {
-            tween(durationMillis = 0)
-        } else {
-            tween(durationMillis = 300)
-        },
-        label = "slideOffset",
-    )
+    val offsetAnim = remember { androidx.compose.animation.core.Animatable(0f) }
+    val scope = rememberCoroutineScope()
+
+    // Handle dismissal delay after completion
+    LaunchedEffect(isComplete) {
+        if (isComplete) {
+            kotlinx.coroutines.delay(800)
+            onSlideComplete()
+        }
+    }
 
     val draggableState = rememberDraggableState { delta ->
-        if (maxOffset > 0f) {
-            val oldOffset = offsetX
-            offsetX = (offsetX + delta).coerceIn(0f, maxOffset)
-            val moved = kotlin.math.abs(offsetX - oldOffset)
+        if (maxOffset > 0f && !isComplete) {
+            val oldOffset = offsetAnim.value
+            val newOffset = (oldOffset + delta).coerceIn(0f, maxOffset)
+            scope.launch { offsetAnim.snapTo(newOffset) }
+            val moved = kotlin.math.abs(newOffset - oldOffset)
 
-            // ── Continuous micro-vibration every ~8px of travel ──
             travelSinceLastBuzz += moved
             if (travelSinceLastBuzz >= 8f) {
                 travelSinceLastBuzz = 0f
-                vibrate(5L)   // very short 5ms buzz — feels like texture
+                vibrate(5L)
             }
 
-            // ── Stronger tick at each 25% milestone ──
-            val milestone = ((offsetX / maxOffset) * 4).toInt().coerceIn(0, 4)
+            val milestone = ((newOffset / maxOffset) * 4).toInt().coerceIn(0, 4)
             if (milestone > lastMilestone) {
                 lastMilestone = milestone
-                vibrate(30L)   // noticeable 30ms tick at milestones
+                vibrate(30L)
             }
             if (milestone < lastMilestone) {
                 lastMilestone = milestone
@@ -584,49 +805,173 @@ private fun SlideToSetButton(
         }
     }
 
+    // ── Background Gradient ──
+    val defaultBg = Brush.verticalGradient(listOf(CtaBgColor, CtaBgColor))
+    val successBg = Color.Black // Pure black for "fully black" finish
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(CtaHeight)
-            .onGloballyPositioned { coordinates ->
-                pillWidthPx = coordinates.size.width.toFloat()
-            }
-            .shadow(
-                elevation = 4.dp,
-                shape = RoundedCornerShape(CtaCornerRadius),
-                spotColor = Color(0xFF5A5A5A).copy(alpha = 0.25f),
-                clip = false,
-            )
-            .background(CtaBgColor, RoundedCornerShape(CtaCornerRadius))
-            .innerShadow(
-                shape = RoundedCornerShape(CtaCornerRadius),
-                color = Color(0xFF303030).copy(alpha = 0.25f),
-                blur = 4.dp,
-                offsetX = 1.dp,
-                offsetY = 1.dp
-            ),
-        contentAlignment = Alignment.CenterStart,
+            .onGloballyPositioned { pillWidthPx = it.size.width.toFloat() }
+            .clip(RoundedCornerShape(CtaCornerRadius))
+            .background(defaultBg)
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(CtaCornerRadius)),
+        contentAlignment = Alignment.CenterStart
     ) {
-        // CTA Text centered
+        // 1. Default "SLIDE TO SET" Text (visible on the light background)
         Text(
-            text = if (isComplete) "LOCK IT IN" else "SLIDE TO SET",
-            fontFamily = FontFamily.SansSerif,
-            fontWeight = FontWeight.Medium,
+            text = "SLIDE TO SET",
+            fontFamily = SatoshiFontFamily,
+            fontWeight = FontWeight.Bold,
             fontSize = CtaTextSize,
-            color = if (isComplete) CtaTextActive else CtaTextInactive,
-            letterSpacing = LabelTracking,
-            modifier = Modifier.align(Alignment.Center),
+            color = CtaTextInactive,
+            letterSpacing = 1.2.sp,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .drawWithContent {
+                    // Fade out the base text as the thumb passes over it
+                    val center = offsetAnim.value + circleTotalPx / 2
+                    val fadeWidthPx = with(density) { 40.dp.toPx() }
+                    val startFade = center - fadeWidthPx
+                    val endFade = center + fadeWidthPx
+                    val alpha = when {
+                        this.size.width < startFade -> 1f
+                        this.size.width > endFade -> 0f
+                        else -> 1f - ((this.size.width - startFade) / (endFade - startFade))
+                    }
+                    // Simple alpha fade based on thumb position
+                    // Actually, let's just use the progress for simplicity
+                    val textAlpha = (1f - (offsetAnim.value / (maxOffset.coerceAtLeast(1f) * 0.7f))).coerceIn(0f, 1f)
+                    this.drawContent()
+                }
         )
 
-        // Draggable circle with haptic feedback
+        // 2. Success Layer (Refined: No evidence at start + Interactive Blur)
+        val revealProgress = (offsetAnim.value / (maxOffset.coerceAtLeast(1f))).coerceIn(0f, 1f)
+        val thumbCenterX = offsetAnim.value + circleTotalPx / 2
+        // Feather width scales slightly with progress for a more "lush" feel
+        val featherWidth = with(density) { (40 + 40 * revealProgress).dp.toPx() }
+
         Box(
             modifier = Modifier
-                .offset { IntOffset(animatedOffset.roundToInt(), 0) }
+                .fillMaxSize()
+                .graphicsLayer {
+                    // Overall alpha fades in to ensure "no evidence" at the absolute start
+                    alpha = (revealProgress / 0.1f).coerceIn(0f, 1f)
+                }
+                .drawWithContent {
+                    // Perfectly align the reveal with the thumb's position
+                    // The mask start follows the thumb, and pushes all the way to the end as progress hits 1.0
+                    val maskStart = if (revealProgress > 0.98f) size.width else (offsetAnim.value + circleTotalPx * 0.7f).coerceIn(0f, size.width)
+                    val maskEnd = (maskStart + featherWidth).coerceAtLeast(maskStart + 1f)
+                    
+                    val colors = listOf(Color.Black, Color.Transparent)
+                    val stops = floatArrayOf(
+                        (maskStart / size.width).coerceIn(0f, 1f),
+                        (maskEnd / size.width).coerceIn(0f, 1f)
+                    )
+                    
+                    val maskBrush = Brush.linearGradient(
+                        colorStops = stops.mapIndexed { i, s -> s to colors[i] }.toTypedArray(),
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width, 0f)
+                    )
+
+                    drawIntoCanvas { canvas ->
+                        val paint = Paint().apply { this.isAntiAlias = true }
+                        val rect = androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height)
+                        canvas.saveLayer(rect, paint)
+                        drawContent()
+                        // Use DstIn to mask the content
+                        drawRect(maskBrush, blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
+                        canvas.restore()
+                    }
+                }
+        ) {
+            // Dark Background with Inner Shadow
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(successBg)
+                    .innerShadow(
+                        shape = RoundedCornerShape(CtaCornerRadius),
+                        color = Color(182, 182, 182).copy(alpha = 0.31f),
+                        blur = 4.dp,
+                        offsetX = 4.dp,
+                    offsetY = 4.dp
+                    )
+            )
+
+            // "Lets make it count" Text & Gold Laurel Wreaths
+            // The blur here is now "interactive" - it softens as you move
+            val interactiveBlur = (1.5 * (1f - revealProgress)).dp 
+            
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .align(Alignment.Center),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.leaf_left),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(width = 28.dp, height = 48.dp)
+                        .blur(interactiveBlur.coerceAtLeast(0.1.dp)),
+                    tint = Color.Unspecified
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "\u201c Lets make it count \u201d",
+                    fontFamily = SatoshiFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = CtaTextSize,
+                    color = Color.White,
+                    letterSpacing = 1.2.sp,
+                    modifier = Modifier.blur(interactiveBlur.coerceAtLeast(0.1.dp))
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                    painter = painterResource(id = R.drawable.leaf_right),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(width = 28.dp, height = 48.dp)
+                        .blur(interactiveBlur.coerceAtLeast(0.1.dp)),
+                    tint = Color.Unspecified
+                )
+            }
+        }
+
+        // 3. Visual Thumb + Draggable Logic
+        // Gradual color transition based on revealProgress
+        // We start the transition after 20% drag and finish at 90% for a smooth, natural feel
+        val transitionProgress = ((revealProgress - 0.2f) / 0.7f).coerceIn(0f, 1f)
+        
+        val thumbBgColor = androidx.compose.ui.graphics.lerp(
+            Color.White, 
+            Color(0xFF1B1B1B), 
+            transitionProgress
+        )
+        val thumbIconColor = androidx.compose.ui.graphics.lerp(
+            Color.Black, 
+            Color.White, 
+            transitionProgress
+        )
+
+        Box(
+            modifier = Modifier
+                .offset { IntOffset(offsetAnim.value.roundToInt(), 0) }
                 .padding(start = CtaCircleOffset, top = CtaCircleOffset, bottom = CtaCircleOffset)
                 .size(CtaCircleSize)
-                .shadow(elevation = 4.dp, shape = CircleShape)
-                .clip(CircleShape)
-                .background(Color.White)
+                // Sharper shadow to prevent "weird blur" look
+                .shadow(
+                    elevation = 4.dp, 
+                    shape = CircleShape,
+                    spotColor = Color.Black.copy(alpha = 0.4f)
+                )
+                .background(thumbBgColor, CircleShape)
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = draggableState,
@@ -636,28 +981,66 @@ private fun SlideToSetButton(
                     },
                     onDragStopped = {
                         isDragging = false
-                        if (maxOffset > 0f && offsetX > maxOffset * 0.8f) {
-                            // ── Slide complete ──
-                            vibrate(100L)   // strong 100ms confirmation buzz
+                        if (maxOffset > 0f && offsetAnim.value > maxOffset * 0.8f) {
+                            vibrate(100L)
                             isComplete = true
-                            offsetX = maxOffset
-                            onSlideComplete()
+                            scope.launch { offsetAnim.animateTo(maxOffset, tween(200)) }
                         } else {
-                            // ── Snap back to start ──
-                            offsetX = 0f
+                            scope.launch { 
+                                isComplete = false
+                                offsetAnim.animateTo(0f, tween(300)) 
+                            }
                             lastMilestone = 0
                             travelSinceLastBuzz = 0f
                         }
-                    },
+                    }
                 ),
-            contentAlignment = Alignment.Center,
+            contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = "›",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Light,
-                color = HeadingColor,
-            )
+            // Gradual Icon Transition (Interpolated Alpha)
+            // Starts fading chevron at 70% and finishes tick by 90%
+            // ── Transform Animation (Next -> Tick) ──
+            // We use scale and rotation to make it feel like a transformation
+            val nextIconAlpha = (1f - (revealProgress - 0.7f) / 0.15f).coerceIn(0f, 1f)
+            val tickIconAlpha = ((revealProgress - 0.75f) / 0.2f).coerceIn(0f, 1f)
+            
+            val nextScale = if (revealProgress < 0.7f) 1f else (1f - (revealProgress - 0.7f) * 2f).coerceIn(0.4f, 1f)
+            val nextRotate = if (revealProgress < 0.7f) 0f else (revealProgress - 0.7f) * 90f
+            
+            val tickScale = if (revealProgress < 0.75f) 0.4f else ((revealProgress - 0.75f) * 4f + 0.4f).coerceIn(0.4f, 1f)
+            val tickRotate = if (revealProgress < 0.75f) -45f else (1f - (revealProgress - 0.75f) * 4f) * -45f
+
+            if (nextIconAlpha > 0f) {
+                Icon(
+                    painter = painterResource(id = R.drawable.next_icon),
+                    contentDescription = "Slide to Set",
+                    modifier = Modifier
+                        .size(24.dp)
+                        .graphicsLayer { 
+                            alpha = nextIconAlpha 
+                            scaleX = nextScale
+                            scaleY = nextScale
+                            rotationZ = nextRotate
+                        },
+                    tint = thumbIconColor
+                )
+            }
+            
+            if (tickIconAlpha > 0f) {
+                Icon(
+                    painter = painterResource(id = R.drawable.tick_icon), 
+                    contentDescription = "Complete",
+                    modifier = Modifier
+                        .size(28.dp)
+                        .graphicsLayer { 
+                            alpha = tickIconAlpha 
+                            scaleX = tickScale
+                            scaleY = tickScale
+                            rotationZ = tickRotate
+                        },
+                    tint = thumbIconColor
+                )
+            }
         }
     }
 }
