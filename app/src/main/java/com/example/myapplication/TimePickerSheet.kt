@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.toArgb
 import android.graphics.BlurMaskFilter
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import android.util.Log
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.text.TextStyle
@@ -45,7 +46,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
-import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.PI
@@ -63,10 +66,10 @@ private val SatoshiFontFamily = FontFamily(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DatePickerSheet(
+fun TimePickerSheet(
     onDismiss: () -> Unit,
-    onDateSelected: (LocalDate) -> Unit,
-    initialDate: LocalDate = LocalDate.now(),
+    onTimeSelected: (LocalTime) -> Unit,
+    initialTime: LocalTime = LocalTime.now(),
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // Waveform scroll logic with momentum
@@ -75,29 +78,30 @@ fun DatePickerSheet(
     val velocityTracker = remember { VelocityTracker() }
     
     // Unified step based on barWidth (2dp) + barSpacing (12dp)
-    val dayStepPx = with(LocalDensity.current) { 14.dp.toPx() }
+    // Each step represents 1 minute
+    val timeStepPx = with(LocalDensity.current) { 14.dp.toPx() }
     
     // For visual display in the sheet
-    var currentDisplayDate by remember { mutableStateOf(initialDate) }
+    var currentDisplayTime by remember { mutableStateOf(initialTime) }
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     var lastSnappedIndex by remember { mutableStateOf(0) }
 
-    // Capture the initial date once to avoid feedback loops
-    val baseDate = remember { initialDate }
+    // Capture the initial time once to avoid feedback loops when parent state updates
+    val baseTime = remember { initialTime }
     
-    // Sync display date and haptics with scroll offset
+    // Sync display time and haptics with scroll offset
     LaunchedEffect(Unit) {
         snapshotFlow { totalOffset.value }
             .collect { offset ->
-                val currentIndex = (offset / dayStepPx).roundToInt()
+                val currentIndex = (offset / timeStepPx).roundToInt()
                 if (currentIndex != lastSnappedIndex) {
                     lastSnappedIndex = currentIndex
                     haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                     
-                    val newDate = baseDate.plusDays((-currentIndex).toLong())
-                    if (newDate != currentDisplayDate) {
-                        currentDisplayDate = newDate
-                        onDateSelected(newDate)
+                    val newTime = baseTime.plusMinutes((-currentIndex).toLong())
+                    if (newTime != currentDisplayTime) {
+                        currentDisplayTime = newTime
+                        onTimeSelected(newTime)
                     }
                 }
             }
@@ -125,7 +129,7 @@ fun DatePickerSheet(
         ) {
             // 1. HEADING
             Text(
-                text = "Set your date",
+                text = "Set your time",
                 style = TextStyle(
                     fontFamily = SatoshiFontFamily,
                     fontSize = 32.sp,
@@ -143,7 +147,7 @@ fun DatePickerSheet(
 
             // 2. SUBTITLE
             Text(
-                text = "Scroll to set the date.",
+                text = "Scroll to set the time.",
                 style = TextStyle(
                     fontFamily = SatoshiFontFamily,
                     fontSize = 12.sp,
@@ -159,18 +163,26 @@ fun DatePickerSheet(
                 modifier = Modifier.padding(top = 2.dp)
             )
 
-            // 3. DATE DISPLAY
+            // 3. TIME DISPLAY
+            val timeFormatter = DateTimeFormatter.ofPattern("hh:mm", Locale.US)
+            val amPmFormatter = DateTimeFormatter.ofPattern("a", Locale.US)
+            
             Column(
                 modifier = Modifier.padding(top = 44.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = currentDisplayDate.dayOfMonth.toString(),
+                    text = currentDisplayTime.format(timeFormatter),
                     style = TextStyle(
                         fontFamily = DentonFontFamily,
                         fontSize = 96.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color.Black,
+                        brush = Brush.verticalGradient(
+                            0.0f to Color.White,
+                            0.1f to Color.Black,
+                            startY = 0f,
+                            endY = 120f
+                        ),
                         letterSpacing = (-1.44).sp,
                         shadow = Shadow(
                             color = Color(47, 47, 47, (0.34f * 255).toInt()),
@@ -179,9 +191,23 @@ fun DatePickerSheet(
                         )
                     )
                 )
-                // Subtext with shadow - moved closer
+                // Subtext (AM/PM)
                 Text(
-                    text = "${currentDisplayDate.month.name.take(3).lowercase()}/${currentDisplayDate.year}",
+                    text = currentDisplayTime.format(amPmFormatter).lowercase(),
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        scope.launch {
+                            // Toggle AM/PM by shifting the scroll drum by 12 hours (720 minutes)
+                            val shift = 720f * timeStepPx
+                            totalOffset.animateTo(
+                                targetValue = totalOffset.value - shift,
+                                animationSpec = spring(stiffness = Spring.StiffnessLow)
+                            )
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        }
+                    },
                     style = TextStyle(
                         fontFamily = DentonFontFamily,
                         fontSize = 15.sp,
@@ -198,7 +224,7 @@ fun DatePickerSheet(
 
             // 4. QUOTE TEXT
             Text(
-                text = "\u201c this is going to be the best day lets make it count\u201d",
+                text = "\u201c time is a created thing. to say \u2018i don\u2019t have time\u2019, is to say, \u2018i don\u2019t want to\u2019\u201d",
                 style = TextStyle(
                     fontFamily = SatoshiFontFamily,
                     fontSize = 12.sp,
@@ -217,9 +243,8 @@ fun DatePickerSheet(
                 ),
                 modifier = Modifier
                     .padding(top = 16.dp)
-                    .width(163.dp)
+                    .width(200.dp)
             )
-
 
             // 5. SCROLL PICKER (Waveform)
             Box(
@@ -241,11 +266,9 @@ fun DatePickerSheet(
                                 val velocity = velocityTracker.calculateVelocity().x
                                 scope.launch {
                                     if (abs(velocity) > 100f) {
-                                        // Fling with decay
                                         totalOffset.animateDecay(velocity, exponentialDecay())
                                     }
-                                    // Always snap to the nearest pillar after movement
-                                    val finalSnappedOffset = (totalOffset.value / dayStepPx).roundToInt() * dayStepPx
+                                    val finalSnappedOffset = (totalOffset.value / timeStepPx).roundToInt() * timeStepPx
                                     totalOffset.animateTo(
                                         targetValue = finalSnappedOffset,
                                         animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioLowBouncy)
@@ -256,20 +279,16 @@ fun DatePickerSheet(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                // ── Tension Lines & Needles ──
+                // ── Waveform Canvas ──
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val centerX = size.width / 2
                     val centerY = size.height / 2 + 10.dp.toPx()
                     val barWidth = 2.dp.toPx()
-                    val barSpacing = 12.dp.toPx() // Tighter spacing for "drum" density
+                    val barSpacing = 12.dp.toPx()
                     val step = barWidth + barSpacing
                     val centerBarHeight = 120.dp.toPx()
-                    val edgeBarHeight = 4.dp.toPx() // Even shorter edges
+                    val edgeBarHeight = 4.dp.toPx()
 
-                    // 1. Draw Corner Vectors (Using exported PNGs)
-                    // (Corner images are now placed as Composables in the Box below for better alignment)
-
-                    // 2. Draw Needles
                     val currentOffset = totalOffset.value
                     val startI = ((-centerX - currentOffset) / step).toInt() - 4
                     val endI = ((size.width - centerX - currentOffset) / step).toInt() + 4
@@ -277,15 +296,14 @@ fun DatePickerSheet(
                     for (i in startI..endI) {
                         val x = centerX + (i * step) + currentOffset
                         val distanceFromCenter = abs(x - centerX)
-                        val maxDistance = (centerX * 0.9f) // Reveal more across the drum width
+                        val maxDistance = (centerX * 0.9f)
                         
                         val normalizedDistance = (distanceFromCenter / maxDistance).coerceIn(0f, 1f)
-                        // Slightly wider falloff for the "drum" reveal
                         val heightFactor = (1f - normalizedDistance).pow(2.2f) 
                         val barHeight = edgeBarHeight + (centerBarHeight - edgeBarHeight) * heightFactor
 
                         if (x > -20f && x < size.width + 20f) {
-                            // 2a. Dynamic Needle Shadow (Stronger at center)
+                            // Shadow
                             drawIntoCanvas { canvas ->
                                 val shadowPaint = android.graphics.Paint().apply {
                                     isAntiAlias = true
@@ -303,7 +321,7 @@ fun DatePickerSheet(
                                 )
                             }
 
-                            // 2b. Dynamic Needle Gradient (Black center, Gray edges)
+                            // Gradient Needle
                             val topColor = if (distanceFromCenter < step) Color.Black else Color(0xFF212121).copy(alpha = heightFactor)
                             
                             drawRoundRect(
@@ -323,9 +341,7 @@ fun DatePickerSheet(
                     }
                 }
 
-                // ── Framing Vectors (Corner & Side Ornaments from Figma) ──
-                // ── Framing Vectors (Corner Ornaments precisely aligned to drum) ──
-                // Top Left
+                // ── Framing Vectors ──
                 Image(
                     painter = painterResource(id = R.drawable.topleft),
                     contentDescription = null,
@@ -335,7 +351,6 @@ fun DatePickerSheet(
                         .offset(y = 28.dp)
                         .size(width = 81.dp, height = 50.dp)
                 )
-                // Top Right
                 Image(
                     painter = painterResource(id = R.drawable.top_right),
                     contentDescription = null,
@@ -345,7 +360,6 @@ fun DatePickerSheet(
                         .offset(y = 28.dp)
                         .size(width = 81.dp, height = 50.dp)
                 )
-                // Bottom Left
                 Image(
                     painter = painterResource(id = R.drawable.leftbottom),
                     contentDescription = null,
@@ -355,7 +369,6 @@ fun DatePickerSheet(
                         .offset(y = (-14).dp)
                         .size(width = 81.dp, height = 50.dp)
                 )
-                // Bottom Right
                 Image(
                     painter = painterResource(id = R.drawable.rrightbottom),
                     contentDescription = null,
@@ -366,7 +379,7 @@ fun DatePickerSheet(
                         .size(width = 81.dp, height = 50.dp)
                 )
 
-                // ── Center Indicator Triangle (Premium Lock with Shadow) ──
+                // ── Center Indicator ──
                 Canvas(modifier = Modifier
                     .size(width = 14.dp, height = 8.dp)
                     .align(Alignment.TopCenter)
@@ -378,8 +391,6 @@ fun DatePickerSheet(
                         lineTo(size.width / 2, size.height)
                         close()
                     }
-                    
-                    // Triangle Shadow
                     drawIntoCanvas { canvas ->
                         val shadowPaint = android.graphics.Paint().apply {
                             color = android.graphics.Color.BLACK
@@ -388,7 +399,6 @@ fun DatePickerSheet(
                         }
                         canvas.nativeCanvas.drawPath(trianglePath.asAndroidPath(), shadowPaint)
                     }
-                    
                     drawPath(
                         path = trianglePath,
                         brush = Brush.verticalGradient(
@@ -398,7 +408,6 @@ fun DatePickerSheet(
                 }
             }
 
-
             // 6. LOCK IT IN BUTTON
             Box(
                 modifier = Modifier
@@ -406,7 +415,7 @@ fun DatePickerSheet(
                     .width(358.dp)
                     .height(68.dp)
                     .shadow(
-                        elevation = 8.dp, // Increased softness for the outer shadow
+                        elevation = 8.dp,
                         shape = RoundedCornerShape(34.dp),
                         clip = false,
                         ambientColor = Color.Black.copy(alpha = 0.47f),
@@ -435,7 +444,7 @@ fun DatePickerSheet(
                         offsetY = 4.dp
                     )
                     .clickable { 
-                        onDateSelected(currentDisplayDate)
+                        onTimeSelected(currentDisplayTime)
                         onDismiss() 
                     },
                 contentAlignment = Alignment.Center

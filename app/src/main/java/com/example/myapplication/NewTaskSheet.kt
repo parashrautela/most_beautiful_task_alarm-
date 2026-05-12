@@ -58,6 +58,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import java.util.Calendar
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 // ─── Custom Inner Shadow Modifier ───────────────────────────────────────────
@@ -209,20 +212,22 @@ fun NewTaskSheet(onDismiss: () -> Unit) {
     }
 
     var selectedFullDate by remember { 
-        mutableStateOf(java.time.LocalDate.now())
+        mutableStateOf(LocalDate.now())
     }
     
     val selectedDay = selectedFullDate.dayOfMonth
     val selectedMonth = selectedFullDate.month.name.take(3).lowercase()
     val selectedYear = selectedFullDate.year
 
-    var selectedHour by remember { 
-        val h = initialCalendar.get(Calendar.HOUR)
-        mutableIntStateOf(if (h == 0) 12 else h)
+    var selectedFullTime by remember { 
+        mutableStateOf(LocalTime.of(
+            initialCalendar.get(Calendar.HOUR_OF_DAY),
+            initialCalendar.get(Calendar.MINUTE)
+        ))
     }
-    var selectedMinute by remember { mutableIntStateOf(initialCalendar.get(Calendar.MINUTE)) }
-    var amPm by remember { mutableStateOf(if (initialCalendar.get(Calendar.AM_PM) == Calendar.AM) "AM" else "PM") }
+    
     var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
 
     // Main Sheet
     ModalBottomSheet(
@@ -237,10 +242,10 @@ fun NewTaskSheet(onDismiss: () -> Unit) {
             selectedDay = selectedDay,
             selectedMonth = selectedMonth,
             selectedYear = selectedYear,
-            selectedHour = selectedHour,
-            selectedMinute = selectedMinute,
-            amPm = amPm,
+            selectedTime = selectedFullTime,
+            onTimeSelected = { selectedFullTime = it },
             onShowDatePicker = { showDatePicker = true },
+            onShowTimePicker = { showTimePicker = true },
             onDismiss = onDismiss
         )
     }
@@ -255,6 +260,17 @@ fun NewTaskSheet(onDismiss: () -> Unit) {
             initialDate = selectedFullDate
         )
     }
+
+    // Time Picker Sheet (Sibling)
+    if (showTimePicker) {
+        TimePickerSheet(
+            onDismiss = { showTimePicker = false },
+            onTimeSelected = { newTime ->
+                selectedFullTime = newTime
+            },
+            initialTime = selectedFullTime
+        )
+    }
 }
 
 @Composable
@@ -262,10 +278,10 @@ private fun NewTaskSheetContent(
     selectedDay: Int,
     selectedMonth: String,
     selectedYear: Int,
-    selectedHour: Int,
-    selectedMinute: Int,
-    amPm: String,
+    selectedTime: LocalTime,
+    onTimeSelected: (LocalTime) -> Unit,
     onShowDatePicker: () -> Unit,
+    onShowTimePicker: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var title by remember { mutableStateOf("") }
@@ -526,16 +542,25 @@ private fun NewTaskSheetContent(
             }
 
             // Time Display
+            val timeFormatter = DateTimeFormatter.ofPattern("hh:mm", Locale.US)
+            val amPm = selectedTime.format(DateTimeFormatter.ofPattern("a", Locale.US))
+            val view = LocalView.current
+            
             Row(
                 verticalAlignment = Alignment.Bottom,
             ) {
                 Text(
-                    text = String.format("%02d:%02d", selectedHour, selectedMinute),
+                    text = selectedTime.format(timeFormatter),
                     fontFamily = DentonFontFamily,
                     fontWeight = FontWeight.Medium,
                     fontSize = 48.sp,
-                    color = Color.Black,
                     style = TextStyle(
+                        brush = Brush.verticalGradient(
+                            0.0f to Color.White,
+                            0.1f to Color.Black,
+                            startY = 0f,
+                            endY = 60f
+                        ),
                         shadow = androidx.compose.ui.graphics.Shadow(
                             color = Color(47, 47, 47, (0.34f * 255).toInt()),
                             offset = androidx.compose.ui.geometry.Offset(0f, 4f),
@@ -543,7 +568,12 @@ private fun NewTaskSheetContent(
                         )
                     ),
                     letterSpacing = (-1.44).sp,
-                    modifier = Modifier.alignByBaseline()
+                    modifier = Modifier
+                        .alignByBaseline()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onShowTimePicker() }
                 )
                 // Inner Row for Suffix + Icon
                 Row(
@@ -551,7 +581,7 @@ private fun NewTaskSheetContent(
                     modifier = Modifier.padding(start = 2.dp)
                 ) {
                     Text(
-                        text = " $amPm",
+                        text = " $amPm".lowercase(),
                         fontFamily = DentonFontFamily,
                         fontWeight = FontWeight.Medium,
                         fontSize = 15.sp,
@@ -564,7 +594,16 @@ private fun NewTaskSheetContent(
                             )
                         ),
                         letterSpacing = (-0.45).sp,
-                        modifier = Modifier.alignByBaseline()
+                        modifier = Modifier
+                            .alignByBaseline()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                // Toggle AM/PM directly
+                                onTimeSelected(selectedTime.plusHours(12))
+                                view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                            }
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     // Figma Exported Edit Icon
