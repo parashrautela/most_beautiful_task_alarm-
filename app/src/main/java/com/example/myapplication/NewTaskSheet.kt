@@ -3,6 +3,7 @@ package com.example.myapplication
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -121,9 +122,9 @@ private val PlaceholderColor = Color(0xFFB5B5B5)    // "Enter title", descriptio
 private val DescBorderFilled = Color(0xFF777777)    // Left border when description has text
 private val DescBorderEmpty = Color(0xFFD9D9D9)     // Left border when description is empty
 private val PriorityLabelColor = Color(0xFF3A3A3A)  // Important, Critical, Flexible text
-private val CtaBgColor = Color(0xFFE0E0E0)          // Lighter, more silver track
+private val CtaBgColor = Color(0xFFE5E7EB)          // Figma: bg #E5E7EB
 private val CtaTextActive = Color(0xFF3A3A3A)       // "LOCK IT IN" text
-private val CtaTextInactive = Color(0xFF555555)     // More visible gray text
+private val CtaTextInactive = Color(0xFF9CA3AF)     // Figma: text #9CA3AF
 
 // Priority swatch gradients (from Figma: gradient top → bottom)
 private val ImportantGradient = Brush.verticalGradient(
@@ -188,10 +189,10 @@ private val DescBarHeight = 100.dp
 private val SwatchSize = 44.dp
 
 // CTA pill
-private val CtaHeight = 68.dp
-private val CtaCornerRadius = 32.dp
-private val CtaCircleSize = 60.dp
-private val CtaCircleOffset = 4.dp
+private val CtaHeight = 64.dp
+private val CtaCornerRadius = 40.dp // Increased for a more premium, rounded feel
+private val CtaCircleSize = 52.dp
+private val CtaCircleOffset = 6.dp
 
 // ─── Composable ─────────────────────────────────────────────────────────────
 
@@ -199,40 +200,21 @@ private val CtaCircleOffset = 4.dp
 @Composable
 fun NewTaskSheet(onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = SheetBg,
-        shape = RoundedCornerShape(topStart = SheetCornerRadius, topEnd = SheetCornerRadius),
-        dragHandle = null,      // we draw our own
-        tonalElevation = 0.dp,
-    ) {
-        NewTaskSheetContent(onDismiss = onDismiss)
-    }
-}
-
-@Composable
-private fun NewTaskSheetContent(onDismiss: () -> Unit) {
-    var title by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var selectedPriority by remember { mutableIntStateOf(0) }  // 0=Important, 1=Critical, 2=Flexible
-
-    val scrollState = rememberScrollState()
-    val density = LocalDensity.current.density
-
-    // Initial Date/Time Logic (Today + 30 mins)
+    
+    // Lifted State for Date and Time
     val initialCalendar = remember {
         Calendar.getInstance().apply {
             add(Calendar.MINUTE, 30)
         }
     }
 
-    var selectedDay by remember { mutableIntStateOf(initialCalendar.get(Calendar.DAY_OF_MONTH)) }
-    var selectedMonth by remember { 
-        mutableStateOf(initialCalendar.getDisplayName(Calendar.MONTH, Calendar.SHORT, Locale.getDefault())?.lowercase() ?: "may") 
+    var selectedFullDate by remember { 
+        mutableStateOf(java.time.LocalDate.now())
     }
-    var selectedYear by remember { mutableIntStateOf(initialCalendar.get(Calendar.YEAR)) }
+    
+    val selectedDay = selectedFullDate.dayOfMonth
+    val selectedMonth = selectedFullDate.month.name.take(3).lowercase()
+    val selectedYear = selectedFullDate.year
 
     var selectedHour by remember { 
         val h = initialCalendar.get(Calendar.HOUR)
@@ -240,6 +222,57 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
     }
     var selectedMinute by remember { mutableIntStateOf(initialCalendar.get(Calendar.MINUTE)) }
     var amPm by remember { mutableStateOf(if (initialCalendar.get(Calendar.AM_PM) == Calendar.AM) "AM" else "PM") }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    // Main Sheet
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SheetBg,
+        shape = RoundedCornerShape(topStart = SheetCornerRadius, topEnd = SheetCornerRadius),
+        dragHandle = null,
+        tonalElevation = 0.dp,
+    ) {
+        NewTaskSheetContent(
+            selectedDay = selectedDay,
+            selectedMonth = selectedMonth,
+            selectedYear = selectedYear,
+            selectedHour = selectedHour,
+            selectedMinute = selectedMinute,
+            amPm = amPm,
+            onShowDatePicker = { showDatePicker = true },
+            onDismiss = onDismiss
+        )
+    }
+
+    // Date Picker Sheet (Sibling, not nested)
+    if (showDatePicker) {
+        DatePickerSheet(
+            onDismiss = { showDatePicker = false },
+            onDateSelected = { newDate ->
+                selectedFullDate = newDate
+            },
+            initialDate = selectedFullDate
+        )
+    }
+}
+
+@Composable
+private fun NewTaskSheetContent(
+    selectedDay: Int,
+    selectedMonth: String,
+    selectedYear: Int,
+    selectedHour: Int,
+    selectedMinute: Int,
+    amPm: String,
+    onShowDatePicker: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var selectedPriority by remember { mutableIntStateOf(0) }  // 0=Important, 1=Critical, 2=Flexible
+
+    val scrollState = rememberScrollState()
 
     Column(
         modifier = Modifier
@@ -437,6 +470,10 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
             // Date Display
             Row(
                 verticalAlignment = Alignment.Bottom,
+                modifier = Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onShowDatePicker() }
             ) {
                 Text(
                     text = selectedDay.toString(),
@@ -593,7 +630,7 @@ private fun NewTaskSheetContent(onDismiss: () -> Unit) {
                                         width = 1.dp,
                                         brush = item.gradient,
                                         shape = swatchShape
-                                    )
+                                      )
                                 } else Modifier
                             ),
                         contentAlignment = Alignment.Center
@@ -815,43 +852,25 @@ private fun SlideToSetButton(
             .height(CtaHeight)
             .onGloballyPositioned { pillWidthPx = it.size.width.toFloat() }
             .clip(RoundedCornerShape(CtaCornerRadius))
-            .background(defaultBg)
-            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(CtaCornerRadius)),
+            .background(CtaBgColor),
         contentAlignment = Alignment.CenterStart
     ) {
-        // 1. Default "SLIDE TO SET" Text (visible on the light background)
+        // 1. Default "SLIDE TO SET" Text (Centered in full pill)
         Text(
             text = "SLIDE TO SET",
+            modifier = Modifier.align(Alignment.Center),
             fontFamily = SatoshiFontFamily,
             fontWeight = FontWeight.Bold,
             fontSize = CtaTextSize,
-            color = CtaTextInactive,
-            letterSpacing = 1.2.sp,
-            modifier = Modifier
-                .align(Alignment.Center)
-                .drawWithContent {
-                    // Fade out the base text as the thumb passes over it
-                    val center = offsetAnim.value + circleTotalPx / 2
-                    val fadeWidthPx = with(density) { 40.dp.toPx() }
-                    val startFade = center - fadeWidthPx
-                    val endFade = center + fadeWidthPx
-                    val alpha = when {
-                        this.size.width < startFade -> 1f
-                        this.size.width > endFade -> 0f
-                        else -> 1f - ((this.size.width - startFade) / (endFade - startFade))
-                    }
-                    // Simple alpha fade based on thumb position
-                    // Actually, let's just use the progress for simplicity
-                    val textAlpha = (1f - (offsetAnim.value / (maxOffset.coerceAtLeast(1f) * 0.7f))).coerceIn(0f, 1f)
-                    this.drawContent()
-                }
+            letterSpacing = 2.sp,
+            color = CtaTextInactive
         )
 
         // 2. Success Layer (Refined: No evidence at start + Interactive Blur)
         val revealProgress = (offsetAnim.value / (maxOffset.coerceAtLeast(1f))).coerceIn(0f, 1f)
         val thumbCenterX = offsetAnim.value + circleTotalPx / 2
-        // Feather width scales slightly with progress for a more "lush" feel
-        val featherWidth = with(density) { (40 + 40 * revealProgress).dp.toPx() }
+        // Feather width tightened for more precision
+        val featherWidth = with(density) { (20 + 20 * revealProgress).dp.toPx() }
 
         Box(
             modifier = Modifier
@@ -861,21 +880,24 @@ private fun SlideToSetButton(
                     alpha = (revealProgress / 0.1f).coerceIn(0f, 1f)
                 }
                 .drawWithContent {
-                    // Perfectly align the reveal with the thumb's position
-                    // The mask start follows the thumb, and pushes all the way to the end as progress hits 1.0
-                    val maskStart = if (revealProgress > 0.98f) size.width else (offsetAnim.value + circleTotalPx * 0.7f).coerceIn(0f, size.width)
-                    val maskEnd = (maskStart + featherWidth).coerceAtLeast(maskStart + 1f)
-                    
-                    val colors = listOf(Color.Black, Color.Transparent)
-                    val stops = floatArrayOf(
-                        (maskStart / size.width).coerceIn(0f, 1f),
-                        (maskEnd / size.width).coerceIn(0f, 1f)
-                    )
-                    
-                    val maskBrush = Brush.linearGradient(
-                        colorStops = stops.mapIndexed { i, s -> s to colors[i] }.toTypedArray(),
-                        start = Offset(0f, 0f),
-                        end = Offset(size.width, 0f)
+                    // 1:1 Physical Reveal with a subtle "Final Push"
+                    // We maintain 1:1 speed for 92% of the drag, then gently accelerate 
+                    // at the very end to swallow any feathered "white space" artifacts.
+                    val baseRadius = thumbCenterX + circleTotalPx / 2
+                    val finalRadius = if (revealProgress > 0.92f) {
+                        val endPush = (revealProgress - 0.92f) / 0.08f
+                        androidx.compose.ui.util.lerp(baseRadius, size.width * 1.4f, endPush)
+                    } else {
+                        baseRadius
+                    }.coerceAtLeast(1f)
+
+                    val maskBrush = Brush.radialGradient(
+                        colorStops = arrayOf(
+                            0.90f to Color.Black,
+                            1.0f to Color.Transparent
+                        ),
+                        center = Offset(0f, size.height / 2),
+                        radius = finalRadius
                     )
 
                     drawIntoCanvas { canvas ->
@@ -883,7 +905,7 @@ private fun SlideToSetButton(
                         val rect = androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height)
                         canvas.saveLayer(rect, paint)
                         drawContent()
-                        // Use DstIn to mask the content
+                        // Use DstIn to mask the content with our curved expansion
                         drawRect(maskBrush, blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
                         canvas.restore()
                     }
@@ -949,11 +971,21 @@ private fun SlideToSetButton(
         // We start the transition after 20% drag and finish at 90% for a smooth, natural feel
         val transitionProgress = ((revealProgress - 0.2f) / 0.7f).coerceIn(0f, 1f)
         
-        val thumbBgColor = androidx.compose.ui.graphics.lerp(
-            Color.White, 
-            Color(0xFF1B1B1B), 
-            transitionProgress
+        // ── Thumb Styling ──
+        // Background Gradient: Interpolate between white and a premium dark gradient
+        val thumbStartColor = androidx.compose.ui.graphics.lerp(Color.White, Color(0xFF3E3E3E), transitionProgress)
+        val thumbEndColor = androidx.compose.ui.graphics.lerp(Color.White, Color(0xFF1B1B1B), transitionProgress)
+        val thumbBrush = Brush.verticalGradient(listOf(thumbStartColor, thumbEndColor))
+
+        // Border: A subtle highlight stroke that appears as we reach success
+        val borderAlpha = transitionProgress
+        val borderBrush = Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.3f * borderAlpha),
+                Color.Black.copy(alpha = 0.1f * borderAlpha)
+            )
         )
+        
         val thumbIconColor = androidx.compose.ui.graphics.lerp(
             Color.Black, 
             Color.White, 
@@ -971,7 +1003,8 @@ private fun SlideToSetButton(
                     shape = CircleShape,
                     spotColor = Color.Black.copy(alpha = 0.4f)
                 )
-                .background(thumbBgColor, CircleShape)
+                .background(thumbBrush, CircleShape)
+                .border(BorderStroke(1.dp, borderBrush), CircleShape)
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = draggableState,
