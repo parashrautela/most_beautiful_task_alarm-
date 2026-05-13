@@ -11,8 +11,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +65,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        // Request Notification Permission for Android 13+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            androidx.core.app.ActivityCompat.requestPermissions(
+                this,
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                1001
+            )
+        }
+
         setContent {
             MyApplicationTheme {
                 TaskAlarmHomeScreen()
@@ -71,6 +86,16 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun TaskAlarmHomeScreen() {
     var showSheet by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var tasks by remember { mutableStateOf(TaskStorage.getTasks(context)) }
+
+    // Refresh tasks when sheet is dismissed
+    LaunchedEffect(showSheet) {
+        if (!showSheet) {
+            tasks = TaskStorage.getTasks(context)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -111,20 +136,36 @@ fun TaskAlarmHomeScreen() {
 
             // ── Cards (offset to the right, Figma: cards at x=84) ──
             Column(
-                modifier = Modifier.padding(start = 62.dp, end = 0.dp),
+                modifier = Modifier
+                    .padding(start = 62.dp, end = 24.dp)
+                    .verticalScroll(rememberScrollState()),
             ) {
-                TaskCard(
-                    title = "Project Review",
-                    subtitle = "Wed, 22 Apr · 1:00 PM",
-                    cardBrush = Brush.verticalGradient(
-                        listOf(Card1GradientTop, Card1GradientBottom),
-                    ),
-                )
-                Spacer(modifier = Modifier.height(20.dp))
-                TaskCard(
-                    title = "Project Review",
-                    subtitle = "Wed, 22 Apr · 1:00 PM",
-                )
+                if (tasks.isEmpty()) {
+                    TaskCard(
+                        title = "No Tasks",
+                        subtitle = "Tap + to add your first alarm",
+                        cardBrush = Brush.verticalGradient(
+                            listOf(Card1GradientTop, Card1GradientBottom),
+                        ),
+                    )
+                } else {
+                    tasks.sortedBy { it.dateTime }.forEachIndexed { index, task ->
+                        val ldt = java.time.LocalDateTime.parse(task.dateTime)
+                        val formatter = java.time.format.DateTimeFormatter.ofPattern("EEE, d MMM · h:mm a", java.util.Locale.US)
+                        val subtitle = ldt.format(formatter)
+
+                        TaskCard(
+                            title = task.title,
+                            subtitle = subtitle,
+                            cardBrush = if (index == 0) {
+                                Brush.verticalGradient(listOf(Card1GradientTop, Card1GradientBottom))
+                            } else {
+                                Brush.verticalGradient(listOf(CardGradientTop, CardGradientBottom))
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                    }
+                }
             }
         }
         Box(

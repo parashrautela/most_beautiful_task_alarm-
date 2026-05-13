@@ -719,8 +719,29 @@ private fun NewTaskSheetContent(
         Spacer(modifier = Modifier.height(36.dp))
 
         // ── Slide-to-Set CTA ─────────────────────────────────────────────
+        val context = androidx.compose.ui.platform.LocalContext.current
         SlideToSetButton(
-            onSlideComplete = onDismiss,
+            onSlideComplete = {
+                val alarmDateTime = java.time.LocalDateTime.of(
+                    java.time.LocalDate.of(selectedYear, java.time.Month.valueOf(selectedMonth.uppercase()), selectedDay),
+                    selectedTime
+                )
+                val task = TaskAlarm(
+                    title = if (title.isEmpty()) "Task Alarm" else title,
+                    description = if (description.isEmpty()) "Time to get things done!" else description,
+                    dateTime = alarmDateTime.toString(),
+                    priority = selectedPriority
+                )
+                TaskStorage.saveTask(context, task)
+                
+                AlarmScheduler.scheduleAlarm(
+                    context = context,
+                    time = alarmDateTime,
+                    title = task.title,
+                    description = task.description
+                )
+                onDismiss()
+            },
             modifier = Modifier
                 .padding(horizontal = 22.dp)
                 .padding(bottom = 32.dp),
