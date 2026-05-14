@@ -86,6 +86,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun TaskAlarmHomeScreen() {
     var showSheet by remember { mutableStateOf(false) }
+    var selectedTask by remember { mutableStateOf<TaskAlarm?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
     var tasks by remember { mutableStateOf(TaskStorage.getTasks(context)) }
 
@@ -94,6 +95,16 @@ fun TaskAlarmHomeScreen() {
         if (!showSheet) {
             tasks = TaskStorage.getTasks(context)
         }
+    }
+
+    // Show detail screen when a task is tapped
+    selectedTask?.let { task ->
+        AlarmDetailScreen(
+            task = task,
+            onBack = { selectedTask = null },
+            onComplete = { selectedTask = null }
+        )
+        return
     }
 
     Box(
@@ -161,7 +172,8 @@ fun TaskAlarmHomeScreen() {
                                 Brush.verticalGradient(listOf(Card1GradientTop, Card1GradientBottom))
                             } else {
                                 Brush.verticalGradient(listOf(CardGradientTop, CardGradientBottom))
-                            }
+                            },
+                            onClick = { selectedTask = task }
                         )
                         Spacer(modifier = Modifier.height(20.dp))
                     }
@@ -271,9 +283,12 @@ private fun TaskCard(
     cardBrush: Brush = Brush.verticalGradient(
         listOf(CardGradientTop, CardGradientBottom),
     ),
+    onClick: () -> Unit = {},
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(24.dp),                              // Figma: rounded-[24px]
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
         border = BorderStroke(1.dp, CardBorder),                        // Figma: border #F2F2F2
