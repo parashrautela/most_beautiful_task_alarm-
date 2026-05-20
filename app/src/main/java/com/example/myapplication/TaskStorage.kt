@@ -27,6 +27,15 @@ object TaskStorage {
             .apply()
     }
 
+    fun deleteTask(context: Context, id: String) {
+        val tasks = getTasks(context).filter { it.id != id }
+        val json = gson.toJson(tasks)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(TASKS_KEY, json)
+            .apply()
+    }
+
     fun getTasks(context: Context): List<TaskAlarm> {
         val json = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(TASKS_KEY, null) ?: return emptyList()

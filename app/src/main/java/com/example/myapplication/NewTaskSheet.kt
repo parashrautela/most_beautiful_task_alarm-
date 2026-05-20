@@ -738,7 +738,8 @@ private fun NewTaskSheetContent(
                     context = context,
                     time = alarmDateTime,
                     title = task.title,
-                    description = task.description
+                    description = task.description,
+                    taskId = task.id
                 )
                 onDismiss()
             },

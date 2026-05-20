@@ -23,6 +23,7 @@ class AlarmService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val title = intent?.getStringExtra("TASK_TITLE") ?: "Task Alarm"
         val desc = intent?.getStringExtra("TASK_DESC") ?: "Time to get things done!"
+        val taskId = intent?.getStringExtra("TASK_ID") ?: ""
         val action = intent?.action
 
         if (action == "STOP_ALARM") {
@@ -30,11 +31,11 @@ class AlarmService : Service() {
             return START_NOT_STICKY
         }
 
-        startAlarm(title, desc)
+        startAlarm(title, desc, taskId)
         return START_STICKY
     }
 
-    private fun startAlarm(title: String, desc: String) {
+    private fun startAlarm(title: String, desc: String, taskId: String) {
         val channelId = "task_alarm_ringing_channel"
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -50,11 +51,18 @@ class AlarmService : Service() {
             notificationManager.createNotificationChannel(channel)
         }
 
-        val stopIntent = Intent(this, AlarmService::class.java).apply {
-            action = "STOP_ALARM"
+        val dismissIntent = Intent(this, MainActivity::class.java).apply {
+            action = "DISMISS_ALARM"
+            putExtra("TASK_ID", taskId)
+            putExtra("TASK_TITLE", title)
+            putExtra("TASK_DESC", desc)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        val stopPendingIntent = PendingIntent.getService(
-            this, 0, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val dismissPendingIntent = PendingIntent.getActivity(
+            this,
+            taskId.hashCode(),
+            dismissIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val notification = NotificationCompat.Builder(this, channelId)
@@ -64,7 +72,8 @@ class AlarmService : Service() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setOngoing(true)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", stopPendingIntent)
+            .setContentIntent(dismissPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", dismissPendingIntent)
             .build()
 
         startForeground(1001, notification)

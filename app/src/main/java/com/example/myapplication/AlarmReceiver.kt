@@ -13,10 +13,12 @@ class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val taskTitle = intent.getStringExtra("TASK_TITLE") ?: "Task Alarm"
         val taskDesc = intent.getStringExtra("TASK_DESC") ?: "Time to get things done!"
+        val taskId = intent.getStringExtra("TASK_ID") ?: ""
 
         val serviceIntent = Intent(context, AlarmService::class.java).apply {
             putExtra("TASK_TITLE", taskTitle)
             putExtra("TASK_DESC", taskDesc)
+            putExtra("TASK_ID", taskId)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

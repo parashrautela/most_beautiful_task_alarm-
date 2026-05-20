@@ -10,7 +10,7 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 object AlarmScheduler {
-    fun scheduleAlarm(context: Context, time: LocalDateTime, title: String, description: String) {
+    fun scheduleAlarm(context: Context, time: LocalDateTime, title: String, description: String, taskId: String) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         
         // Check for exact alarm permission on Android 12+
@@ -25,6 +25,7 @@ object AlarmScheduler {
         val intent = Intent(context, AlarmReceiver::class.java).apply {
             putExtra("TASK_TITLE", title)
             putExtra("TASK_DESC", description)
+            putExtra("TASK_ID", taskId)
         }
 
         val pendingIntent = PendingIntent.getBroadcast(
