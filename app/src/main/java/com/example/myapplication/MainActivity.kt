@@ -1348,42 +1348,42 @@ fun SigningScreen(
                             .widthIn(max = 620.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        // 1. Embossed Bottom Highlight (White / Light)
+                        // 1. Embossed Bottom Highlight (White / Light) - Softened
                         Text(
                             text = snoozePrompt,
                             fontFamily = DentonFontFamily,
                             fontWeight = FontWeight.Medium,
                             fontSize = 48.sp,
                             lineHeight = 52.sp,
-                            color = Color.White.copy(alpha = 0.9f),
+                            color = Color.White.copy(alpha = 0.45f),
                             textAlign = TextAlign.Center,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .offset(x = 1.dp, y = 1.5.dp)
+                                .offset(x = 0.5.dp, y = 0.8.dp)
                         )
 
-                        // 2. Inner Shadow / Engraved Recess (Dark Gray)
+                        // 2. Inner Shadow / Engraved Recess (Dark Gray) - Softened
                         Text(
                             text = snoozePrompt,
                             fontFamily = DentonFontFamily,
                             fontWeight = FontWeight.Medium,
                             fontSize = 48.sp,
                             lineHeight = 52.sp,
-                            color = Color(0xFF4A4A4A).copy(alpha = 0.6f),
+                            color = Color(0xFF4A4A4A).copy(alpha = 0.22f),
                             textAlign = TextAlign.Center,
                             style = LocalTextStyle.current.copy(
                                 shadow = Shadow(
-                                    color = Color.Black.copy(alpha = 0.4f),
-                                    offset = Offset(-0.5f, -0.5f),
-                                    blurRadius = 1.5f
+                                    color = Color.Black.copy(alpha = 0.15f),
+                                    offset = Offset(-0.3f, -0.3f),
+                                    blurRadius = 0.8f
                                 )
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .offset(x = (-1).dp, y = (-1.2).dp)
+                                .offset(x = (-0.5).dp, y = (-0.6).dp)
                         )
 
-                        // 3. Foreground Text with Linear Gradient
+                        // 3. Foreground Text with Linear Gradient - Softened
                         Text(
                             text = snoozePrompt,
                             fontFamily = DentonFontFamily,
@@ -1398,9 +1398,9 @@ fun SigningScreen(
                                     )
                                 ),
                                 shadow = Shadow(
-                                    color = Color.Black.copy(alpha = 0.15f),
-                                    offset = Offset(0f, 1f),
-                                    blurRadius = 2f
+                                    color = Color.Black.copy(alpha = 0.08f),
+                                    offset = Offset(0f, 0.6f),
+                                    blurRadius = 1.2f
                                 )
                             ),
                             textAlign = TextAlign.Center,
