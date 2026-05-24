@@ -1726,23 +1726,6 @@ fun SigningScreen(
             }
         }
 
-        // ─── 7. Gyroscope-driven glare on background ─────────────────────────
-        val backgroundGlareOffsetX by animateFloatAsState(
-            targetValue = rotationYState.floatValue * 1.6f,
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = 8f
-            ),
-            label = "backgroundGlareOffsetX"
-        )
-        val backgroundGlareOffsetY by animateFloatAsState(
-            targetValue = rotationXState.floatValue * 1.0f,
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = 8f
-            ),
-            label = "backgroundGlareOffsetY"
-        )
     }
 }
 
