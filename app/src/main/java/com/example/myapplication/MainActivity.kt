@@ -62,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -1338,52 +1339,74 @@ fun SigningScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = 620.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = snoozePrompt,
-                        fontFamily = DentonFontFamily,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 48.sp,
-                        lineHeight = 52.sp,
-                        color = Color(0xFFDCDCDC),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text(
-                        text = snoozePrompt,
-                        fontFamily = DentonFontFamily,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 48.sp,
-                        lineHeight = 52.sp,
-                        color = Color(0xFFC0C0C0),
-                        textAlign = TextAlign.Center,
-                        style = LocalTextStyle.current.copy(
-                            shadow = Shadow(
-                                color = Color(0xFF4A4A4A).copy(alpha = 0.32f),
-                                offset = Offset(1f, 1f),
-                                blurRadius = 2.6f
-                            )
-                        ),
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .offset(x = 2.dp, y = 2.dp)
-                    )
-                    Text(
-                        text = snoozePrompt,
-                        fontFamily = DentonFontFamily,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 48.sp,
-                        lineHeight = 52.sp,
-                        color = Color(0xFFF5F5F5),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .offset(x = (-1).dp, y = (-1).dp)
-                    )
+                            .widthIn(max = 620.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // 1. Embossed Bottom Highlight (White / Light)
+                        Text(
+                            text = snoozePrompt,
+                            fontFamily = DentonFontFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 48.sp,
+                            lineHeight = 52.sp,
+                            color = Color.White.copy(alpha = 0.9f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .offset(x = 1.dp, y = 1.5.dp)
+                        )
+
+                        // 2. Inner Shadow / Engraved Recess (Dark Gray)
+                        Text(
+                            text = snoozePrompt,
+                            fontFamily = DentonFontFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 48.sp,
+                            lineHeight = 52.sp,
+                            color = Color(0xFF4A4A4A).copy(alpha = 0.6f),
+                            textAlign = TextAlign.Center,
+                            style = LocalTextStyle.current.copy(
+                                shadow = Shadow(
+                                    color = Color.Black.copy(alpha = 0.4f),
+                                    offset = Offset(-0.5f, -0.5f),
+                                    blurRadius = 1.5f
+                                )
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .offset(x = (-1).dp, y = (-1.2).dp)
+                        )
+
+                        // 3. Foreground Text with Linear Gradient
+                        Text(
+                            text = snoozePrompt,
+                            fontFamily = DentonFontFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 48.sp,
+                            lineHeight = 52.sp,
+                            style = TextStyle(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.White,
+                                        Color(0xFFDADADA)
+                                    )
+                                ),
+                                shadow = Shadow(
+                                    color = Color.Black.copy(alpha = 0.15f),
+                                    offset = Offset(0f, 1f),
+                                    blurRadius = 2f
+                                )
+                            ),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(22.dp))
                 Box(
