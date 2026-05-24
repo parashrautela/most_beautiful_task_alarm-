@@ -73,8 +73,16 @@ fun AlarmDetailScreen(
     onBack: () -> Unit,
     onComplete: () -> Unit = {}
 ) {
-    val ldt = remember(task.dateTime) {
-        try { LocalDateTime.parse(task.dateTime) } catch (e: Exception) { LocalDateTime.now() }
+    var currentTask by remember(task.id) { mutableStateOf(task) }
+
+    // Reschedule state
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    var selectedRescheduleDate by remember { mutableStateOf<java.time.LocalDate?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    val ldt = remember(currentTask.dateTime) {
+        try { LocalDateTime.parse(currentTask.dateTime) } catch (e: Exception) { LocalDateTime.now() }
     }
     val dayNum      = ldt.dayOfMonth.toString()
     val monthYear   = ldt.format(DateTimeFormatter.ofPattern("/MMM/yyyy", Locale.US)).lowercase()
@@ -86,7 +94,7 @@ fun AlarmDetailScreen(
     val dayLetters     = listOf("S", "M", "T", "W", "T", "F", "S")
     val activeDayIndex = dayOfWeek % 7
 
-    val priorityLabel = when (task.priority) {
+    val priorityLabel = when (currentTask.priority) {
         0    -> "IMPORTANT"
         1    -> "CRITICAL"
         else -> "FLEXIBLE"
@@ -123,19 +131,19 @@ fun AlarmDetailScreen(
                             .drawBehind {
                                 val d = density
                                 drawIntoCanvas { canvas ->
-                                    val p = android.graphics.Paint().apply {
-                                        color = android.graphics.Color.TRANSPARENT
-                                        // blur=2.8, dx=0, dy=2, alpha=0.21*255≈54
-                                        setShadowLayer(
+                                    val frameworkPaint = android.graphics.Paint().apply {
+                                        color = android.graphics.Color.argb(54, 0, 0, 0) // 21% opacity
+                                        maskFilter = android.graphics.BlurMaskFilter(
                                             2.8f * d,
-                                            0f,
-                                            2f * d,
-                                            android.graphics.Color.argb(54, 0, 0, 0)
+                                            android.graphics.BlurMaskFilter.Blur.NORMAL
                                         )
                                     }
+                                    canvas.nativeCanvas.save()
+                                    canvas.nativeCanvas.translate(0f, 2f * d) // dx=0, dy=2
                                     canvas.nativeCanvas.drawRect(
-                                        0f, 0f, size.width, size.height, p
+                                        0f, 0f, size.width, size.height, frameworkPaint
                                     )
+                                    canvas.nativeCanvas.restore()
                                 }
                             }
                             .background(CheckerBg)
@@ -144,74 +152,41 @@ fun AlarmDetailScreen(
                 }
             }
 
-            // ── Back button (Figma: x=24, y=26, 48×48)
-            // Built from the 4 corner arc PNGs forming a circle + chevron
+            // ── Glassmorphism Back button ──
             Box(
                 modifier = Modifier
-                    .padding(start = 24.dp, top = 26.dp)
-                    .size(48.dp)
+                    .padding(start = 24.dp, top = 56.dp) // Moved down to clear status bar/be less tight
+                    .size(48.dp) // Size requested by user
+                    // Glass background fill
+                    .background(Color.White.copy(alpha = 0.2f), CircleShape)
+                    // Continuous gradient border
+                    .border(
+                        width = 1.dp,
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.8f),
+                                Color.White.copy(alpha = 0.1f)
+                            ),
+                            start = Offset(0f, 0f),
+                            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+                        ),
+                        shape = CircleShape
+                    )
                     .clip(CircleShape)
-                    .background(Color(0x33FFFFFF))        // semi-transparent white fill
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) { onBack() },
                 contentAlignment = Alignment.Center
             ) {
-                // Corner arc overlays — 4 quadrant curves composing the circle border
+                // The chevron icon inside
                 Image(
-                    painter = painterResource(R.drawable.topleft),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(28.dp)
-                        .align(Alignment.TopStart),
+                    painter = painterResource(R.drawable.back_button),
+                    contentDescription = "Back",
+                    // Optically center the chevron by shifting it to the left
+                    modifier = Modifier.size(20.dp).offset(x = (-2).dp),
                     contentScale = ContentScale.Fit
                 )
-                Image(
-                    painter = painterResource(R.drawable.top_right),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(28.dp)
-                        .align(Alignment.TopEnd),
-                    contentScale = ContentScale.Fit
-                )
-                Image(
-                    painter = painterResource(R.drawable.leftbottom),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(28.dp)
-                        .align(Alignment.BottomStart),
-                    contentScale = ContentScale.Fit
-                )
-                Image(
-                    painter = painterResource(R.drawable.rrightbottom),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(28.dp)
-                        .align(Alignment.BottomEnd),
-                    contentScale = ContentScale.Fit
-                )
-                // Chevron left drawn via Canvas
-                Canvas(modifier = Modifier.size(20.dp)) {
-                    val strokeW = 1.6.dp.toPx()
-                    val cx = size.width / 2f
-                    val cy = size.height / 2f
-                    val arm = 5.dp.toPx()
-                    val path = Path().apply {
-                        moveTo(cx + arm * 0.5f, cy - arm)
-                        lineTo(cx - arm * 0.5f, cy)
-                        lineTo(cx + arm * 0.5f, cy + arm)
-                    }
-                    drawPath(
-                        path = path,
-                        color = Color(0xFF4A4A4A),
-                        style = Stroke(
-                            width = strokeW,
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round
-                        )
-                    )
-                }
             }
         }
 
@@ -290,31 +265,36 @@ fun AlarmDetailScreen(
                         )
                     }
 
-                    // Reschedule row (Figma Frame 176: 78×13)
+                    // Reschedule row
+                    val remaining = currentTask.reschedulesRemaining ?: 2
+                    val canReschedule = remaining > 0
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.clickable(
                             interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { /* TODO */ }
+                            indication = null,
+                            enabled = canReschedule
+                        ) {
+                            showDatePicker = true
+                        }
                     ) {
-                        // Clock icon — reschedule_active.png (Figma 329:20, 13×13)
                         Image(
-                            painter = painterResource(R.drawable.reschedule_active),
+                            painter = painterResource(if (canReschedule) R.drawable.reschedule_active else R.drawable.reschedule_inactive),
                             contentDescription = null,
                             modifier = Modifier.size(13.dp),
                             contentScale = ContentScale.Fit
                         )
-                        // "Reschedule" underlined text (Figma 322:337)
                         Text(
                             text = "Reschedule",
                             fontFamily = DetailSatoshiMedium,
                             fontWeight = FontWeight.Medium,
                             fontSize = 12.sp,
-                            color = Color.Black,
+                            color = if (canReschedule) Color.Black else Color(0xFF7F7F7F),
                             letterSpacing = (-0.36).sp,
-                            style = TextStyle(textDecoration = TextDecoration.Underline)
+                            style = TextStyle(
+                                textDecoration = if (canReschedule) TextDecoration.Underline else TextDecoration.LineThrough
+                            )
                         )
                     }
                 }
@@ -331,7 +311,7 @@ fun AlarmDetailScreen(
                         // Title — Denton 48sp #2F2F2F
                         // Figma text-shadow: 0px 1px 0.8px rgba(47,47,47,0.28)
                         Text(
-                            text = task.title,
+                            text = currentTask.title,
                             fontFamily = DetailDentonMedium,
                             fontWeight = FontWeight.Medium,
                             fontSize = 48.sp,
@@ -358,9 +338,9 @@ fun AlarmDetailScreen(
                     }
 
                     // Description (Figma 322:362 — w=237, 12sp, #A4A4A4)
-                    if (task.description.isNotBlank()) {
+                    if (currentTask.description.isNotBlank()) {
                         Text(
-                            text = task.description,
+                            text = currentTask.description,
                             fontFamily = DetailSatoshiMedium,
                             fontWeight = FontWeight.Medium,
                             fontSize = 12.sp,
@@ -460,109 +440,48 @@ fun AlarmDetailScreen(
             }
         }
 
-        // ── 3. "TASK COMPLETED" slider (Figma: y=784, x=22, 358×68) ─────────
-        Box(
+        // ── 3. Dark "Only winners makes it this Far" Slider ─────────
+        com.example.myapplication.SlideToSetButton(
+            onSlideComplete = { onComplete() },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(start = 22.dp, end = 22.dp, bottom = 22.dp)
-                .fillMaxWidth()
-                .height(68.dp)
-                // outer drop-shadow: 2px 2px 4px rgba(90,90,90,0.25)
-                .drawBehind {
-                    val d = density
-                    drawIntoCanvas { canvas ->
-                        val shadowPaint = android.graphics.Paint().apply {
-                            color = android.graphics.Color.TRANSPARENT
-                            setShadowLayer(
-                                4f * d, 2f * d, 2f * d,
-                                android.graphics.Color.argb(64, 90, 90, 90)
-                            )
-                        }
-                        canvas.nativeCanvas.drawRoundRect(
-                            0f, 0f, size.width, size.height,
-                            32f * d, 32f * d, shadowPaint
-                        )
-                    }
-                }
-                .background(SliderBg, RoundedCornerShape(32.dp))
-                .clip(RoundedCornerShape(32.dp))
-        ) {
-            // Inset shadow overlay: inset 1px 1px 4px rgba(48,48,48,0.25)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .neomorphicInnerShadow(
-                        shape = RoundedCornerShape(32.dp),
-                        color = Color(48, 48, 48, 64),
-                        blur = 4.dp,
-                        offsetX = 1.dp,
-                        offsetY = 1.dp
-                    )
-            )
+                .padding(start = 22.dp, end = 22.dp, bottom = 22.dp),
+            successText = "“Only winners makes it this Far”"
+        )
+    }
 
-            // Slider thumb — neomorphic circle (Figma: left=4, top=4, 60×60)
-            Box(
-                modifier = Modifier
-                    .padding(start = 4.dp, top = 4.dp)
-                    .size(60.dp)
-                    // outer drop-shadow + gradient fill (matching Figma slider thumb)
-                    .drawBehind {
-                        val d = density
-                        drawIntoCanvas { canvas ->
-                            val p = android.graphics.Paint().apply {
-                                color = android.graphics.Color.TRANSPARENT
-                                setShadowLayer(
-                                    1.95f * d, 0f, 4f * d,
-                                    android.graphics.Color.argb(43, 124, 124, 124)
-                                )
-                            }
-                            canvas.nativeCanvas.drawCircle(
-                                size.width / 2f, size.height / 2f, size.width / 2f, p
-                            )
-                        }
-                    }
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.White, Color(0xFFF1F2F3))
-                        ),
-                        CircleShape
-                    )
-                    .border(
-                        0.8.dp,
-                        Brush.linearGradient(
-                            colors = listOf(Color(0xFF969696), Color(0xB0F8F8F8)),
-                            start = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
-                            end = Offset(0f, 0f)
-                        ),
-                        CircleShape
-                    )
-                    .clip(CircleShape)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { onComplete() },
-                contentAlignment = Alignment.Center
-            ) {
-                // next_icon.png — the `>` chevron (Figma: black chevron inside the circle)
-                Image(
-                    painter = painterResource(R.drawable.next_icon),
-                    contentDescription = "Complete task",
-                    modifier = Modifier.size(18.dp),
-                    contentScale = ContentScale.Fit
-                )
+    if (showDatePicker) {
+        val currentDateTime = java.time.LocalDateTime.parse(currentTask.dateTime)
+        DatePickerSheet(
+            initialDate = currentDateTime.toLocalDate(),
+            onDismiss = { showDatePicker = false },
+            onDateSelected = { date ->
+                selectedRescheduleDate = date
+                showDatePicker = false
+                showTimePicker = true
             }
+        )
+    }
 
-            // "TASK COMPLETED" label (Figma: left=154, top=29, Satoshi 12sp #3A3A3A)
-            Text(
-                text = "TASK COMPLETED",
-                fontFamily = DetailSatoshiMedium,
-                fontWeight = FontWeight.Medium,
-                fontSize = 12.sp,
-                color = SliderText,
-                letterSpacing = (-0.36).sp,
-                modifier = Modifier
-                    .absoluteOffset(x = 154.dp, y = 29.dp)
-            )
-        }
+    if (showTimePicker) {
+        val currentDateTime = java.time.LocalDateTime.parse(currentTask.dateTime)
+        TimePickerSheet(
+            initialTime = currentDateTime.toLocalTime(),
+            onDismiss = { showTimePicker = false },
+            onTimeSelected = { time ->
+                showTimePicker = false
+                val newDate = selectedRescheduleDate ?: currentDateTime.toLocalDate()
+                val newDateTime = java.time.LocalDateTime.of(newDate, time)
+                
+                val updatedTask = currentTask.copy(
+                    dateTime = newDateTime.toString(),
+                    reschedulesRemaining = (currentTask.reschedulesRemaining ?: 2) - 1
+                )
+                TaskStorage.updateTask(context, updatedTask)
+                TaskStorage.logReschedule(context)
+                
+                currentTask = updatedTask
+            }
+        )
     }
 }

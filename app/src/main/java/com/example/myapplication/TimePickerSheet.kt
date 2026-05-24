@@ -101,7 +101,6 @@ fun TimePickerSheet(
                     val newTime = baseTime.plusMinutes((-currentIndex).toLong())
                     if (newTime != currentDisplayTime) {
                         currentDisplayTime = newTime
-                        onTimeSelected(newTime)
                     }
                 }
             }
@@ -411,38 +410,113 @@ fun TimePickerSheet(
             // 6. LOCK IT IN BUTTON
             Box(
                 modifier = Modifier
-                    .padding(top = 40.dp)
-                    .width(358.dp)
+                    .padding(top = 40.dp, start = 22.dp, end = 22.dp, bottom = 8.dp)
+                    .fillMaxWidth()
                     .height(68.dp)
-                    .shadow(
-                        elevation = 8.dp,
-                        shape = RoundedCornerShape(34.dp),
-                        clip = false,
-                        ambientColor = Color.Black.copy(alpha = 0.47f),
-                        spotColor = Color.Black.copy(alpha = 0.47f)
-                    )
+                    .drawBehind {
+                        // 1. Soft wide ambient shadow path & paint
+                        val ambientPath = Path().apply {
+                            addRoundRect(
+                                RoundRect(
+                                    rect = Rect(
+                                        left = 0f,
+                                        top = 6f.dp.toPx(),
+                                        right = size.width,
+                                        bottom = size.height + 6f.dp.toPx()
+                                    ),
+                                    cornerRadius = CornerRadius(34f.dp.toPx())
+                                )
+                            )
+                        }
+                        val ambientPaint = Paint().apply {
+                            color = Color.Black.copy(alpha = 0.18f)
+                            asFrameworkPaint().maskFilter = android.graphics.BlurMaskFilter(
+                                12f.dp.toPx(),
+                                android.graphics.BlurMaskFilter.Blur.NORMAL
+                            )
+                        }
+
+                        // 2. Tighter dark shadow near base path & paint
+                        val tightPath = Path().apply {
+                            addRoundRect(
+                                RoundRect(
+                                    rect = Rect(
+                                        left = 0f,
+                                        top = 2f.dp.toPx(),
+                                        right = size.width,
+                                        bottom = size.height + 2f.dp.toPx()
+                                    ),
+                                    cornerRadius = CornerRadius(34f.dp.toPx())
+                                )
+                            )
+                        }
+                        val tightPaint = Paint().apply {
+                            color = Color.Black.copy(alpha = 0.38f)
+                            asFrameworkPaint().maskFilter = android.graphics.BlurMaskFilter(
+                                4f.dp.toPx(),
+                                android.graphics.BlurMaskFilter.Blur.NORMAL
+                            )
+                        }
+
+                        // 3. Subtle white outer glow path & paint
+                        val glowPath = Path().apply {
+                            addRoundRect(
+                                RoundRect(
+                                    rect = Rect(
+                                        left = -1f.dp.toPx(),
+                                        top = -1f.dp.toPx(),
+                                        right = size.width + 1f.dp.toPx(),
+                                        bottom = size.height + 1f.dp.toPx()
+                                    ),
+                                    cornerRadius = CornerRadius(34f.dp.toPx())
+                                )
+                            )
+                        }
+                        val glowPaint = Paint().apply {
+                            color = Color.White.copy(alpha = 0.04f)
+                            asFrameworkPaint().maskFilter = android.graphics.BlurMaskFilter(
+                                4f.dp.toPx(),
+                                android.graphics.BlurMaskFilter.Blur.NORMAL
+                            )
+                        }
+                        
+                        drawIntoCanvas { canvas ->
+                            canvas.drawPath(ambientPath, ambientPaint)
+                            canvas.drawPath(tightPath, tightPaint)
+                            canvas.drawPath(glowPath, glowPaint)
+                        }
+                    }
                     .background(
                         brush = Brush.verticalGradient(
-                            colors = listOf(Color(0xFF373737), Color.Black)
-                        ),
-                        shape = RoundedCornerShape(34.dp)
-                    )
-                    .border(
-                        BorderStroke(
-                            width = 1.dp,
-                            brush = Brush.verticalGradient(
-                                colors = listOf(Color(0xFF434343), Color.Black)
+                            colors = listOf(
+                                Color(0xFF3C3C3C), // Smooth top highlight gray
+                                Color(0xFF1E1E1E), // Soft midtone
+                                Color(0xFF080808)  // Pure deep black at bottom
                             )
                         ),
                         shape = RoundedCornerShape(34.dp)
                     )
+                    // Stacked Inset Shadow 1: Subtle top highlight simulating soft overhead lighting
                     .neomorphicInnerShadow(
                         shape = RoundedCornerShape(34.dp),
-                        color = Color.White.copy(alpha = 0.29f),
+                        color = Color.White.copy(alpha = 0.10f),
+                        blur = 4.dp,
+                        offsetX = 0.dp,
+                        offsetY = 3.dp
+                    )
+                    // Stacked Inset Shadow 2: Premium 3D diagonal light reflection
+                    .neomorphicInnerShadow(
+                        shape = RoundedCornerShape(34.dp),
+                        color = Color.White.copy(alpha = 0.08f),
                         blur = 6.8.dp,
                         offsetX = 4.dp,
                         offsetY = 4.dp
                     )
+                    .border(
+                        BorderStroke(1.dp, Color.Black),
+                        shape = RoundedCornerShape(34.dp)
+                    )
+                    .clip(RoundedCornerShape(34.dp))
                     .clickable { 
                         onTimeSelected(currentDisplayTime)
                         onDismiss() 

@@ -12,11 +12,15 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -33,29 +37,51 @@ import androidx.compose.runtime.*
 import java.time.LocalDateTime
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import com.example.myapplication.ui.theme.MyApplicationTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import android.os.Build
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.drawscope.Stroke
+
+enum class AppScreen { Home, Patterns }
 
 // ─── Custom Fonts ───────────────────────────────────────────────────────────
 private val DentonFontFamily = FontFamily(
@@ -75,6 +101,16 @@ private val TextMain   = Color(0xFF000000)        // Figma: text-black
 private val TextGray   = Color(0xFF6A7282)        // Figma: #6A7282
 private val BarBg      = Color(0xFFFFE6E6)        // Figma: left gradient bar #FFE6E6
 
+private val RainbowColors = listOf(
+    Color(0xFFCCE9FF),
+    Color(0xFFBDFFEB),
+    Color(0xFFD0FFCA),
+    Color(0xFFF4FDCF),
+    Color(0xFFFFD0CD),
+    Color(0xFFFFBAFB),
+    Color(0xFFB4B4FF)
+)
+
 // Card gradient (Figma: bg-gradient-to-b from-white to-[#e6e6e6])
 private val CardGradientTop = Color(0xFFFFFFFF)
 private val CardGradientBottom = Color(0xFFE6E6E6)
@@ -85,10 +121,34 @@ private val Card1GradientBottom = Color(0xFFFFCFDF)
 
 private const val CARD_TILT_INTENSITY = 0.42f
 private const val CARD_TILT_MAX_DEGREES = 10f
-private const val CARD_TILT_RESPONSE = 0.18f
-private val SignatureInkStart = Color(0xFF4DD9E8)
-private val SignatureInkEnd = Color(0xFF2BA8B8)
+private const val CARD_TILT_LOW_PASS_KEEP = 0.7f
+private const val CARD_TILT_LOW_PASS_NEW = 0.3f
+private const val CARD_TILT_UPDATE_INTERVAL_NANOS = 16_000_000L
+private val SignatureInkHighlight = Color(0xFFE8FDFF)
+private val SignatureInkStart = Color(0xFF55E7F5)
+private val SignatureInkMid = Color(0xFF16BCE3)
+private val SignatureInkEnd = Color(0xFF168DA3)
 private val CardTouchGlow = SignatureInkStart
+private val SignatureShadowColor = Color(0xFF0B8798)
+private const val SignatureLiveStrokeDp = 4f
+private const val SignatureSavedStrokeDp = 4.2f
+private const val SignatureLiveShadowAlpha = 0.22f
+private const val SignatureSavedShadowAlpha = 0.28f
+private const val SignatureLiveShadowBlur = 2.2f
+private const val SignatureSavedShadowBlur = 3.8f
+private const val SignatureLiveShadowOffsetY = 2.8f
+private const val SignatureSavedShadowOffsetY = 5.2f
+
+// Safe blur helper: blur() uses RenderEffect which requires API 31+.
+// On older devices, skip the blur to avoid rendering crashes.
+private fun Modifier.safeBlur(
+    radius: androidx.compose.ui.unit.Dp,
+    edgeTreatment: BlurredEdgeTreatment = BlurredEdgeTreatment.Rectangle
+): Modifier = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    this.blur(radius, edgeTreatment)
+} else {
+    this // graceful no-op on older devices
+}
 
 class MainActivity : ComponentActivity() {
     private val activeSigningTaskId = mutableStateOf<String?>(null)
@@ -133,7 +193,20 @@ class MainActivity : ComponentActivity() {
                         SigningScreen(
                             task = task,
                             onProceed = {
-                                TaskStorage.deleteTask(this, task.id)
+                                TaskStorage.logDrop(this@MainActivity, task.title)
+                                TaskStorage.deleteTask(this@MainActivity, task.id)
+                                setActiveSigningTaskId(null)
+                            },
+                            onSnooze = { snoozedTask ->
+                                TaskStorage.updateTask(this@MainActivity, snoozedTask)
+                                val snoozeTime = java.time.LocalDateTime.parse(snoozedTask.dateTime)
+                                AlarmScheduler.scheduleAlarm(
+                                    this@MainActivity,
+                                    snoozeTime,
+                                    snoozedTask.title,
+                                    snoozedTask.description,
+                                    snoozedTask.id
+                                )
                                 setActiveSigningTaskId(null)
                             }
                         )
@@ -149,7 +222,19 @@ class MainActivity : ComponentActivity() {
                         SigningScreen(
                             task = fallbackTask,
                             onProceed = {
-                                TaskStorage.deleteTask(this, fallbackTask.id)
+                                TaskStorage.logDrop(this@MainActivity, fallbackTask.title)
+                                TaskStorage.deleteTask(this@MainActivity, fallbackTask.id)
+                                setActiveSigningTaskId(null)
+                            },
+                            onSnooze = { snoozedTask ->
+                                val snoozeTime = java.time.LocalDateTime.parse(snoozedTask.dateTime)
+                                AlarmScheduler.scheduleAlarm(
+                                    this@MainActivity,
+                                    snoozeTime,
+                                    snoozedTask.title,
+                                    snoozedTask.description,
+                                    snoozedTask.id
+                                )
                                 setActiveSigningTaskId(null)
                             }
                         )
@@ -186,9 +271,10 @@ fun TaskAlarmHomeScreen() {
     var selectedTask by remember { mutableStateOf<TaskAlarm?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
     var tasks by remember { mutableStateOf(TaskStorage.getTasks(context)) }
+    var currentScreen by remember { mutableStateOf(AppScreen.Home) }
 
-    // Refresh tasks when sheet is dismissed
-    LaunchedEffect(showSheet) {
+    // Refresh tasks when sheet is dismissed or screen changes
+    LaunchedEffect(showSheet, currentScreen) {
         if (!showSheet) {
             tasks = TaskStorage.getTasks(context)
         }
@@ -200,6 +286,7 @@ fun TaskAlarmHomeScreen() {
             task = task,
             onBack = { selectedTask = null },
             onComplete = {
+                TaskStorage.logCompletion(context)
                 TaskStorage.deleteTask(context, task.id)
                 tasks = TaskStorage.getTasks(context)
                 selectedTask = null
@@ -208,167 +295,180 @@ fun TaskAlarmHomeScreen() {
         return
     }
 
+    if (currentScreen == AppScreen.Patterns) {
+        PatternsScreen(onBack = { currentScreen = AppScreen.Home })
+        return
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.White)
     ) {
-        // ── Left gradient bar (separate from cards, Figma: x=32, 28×244, #FFE6E6) ──
-        Box(
+        // Red line and Vertical Gradient Pill
+        Column(
             modifier = Modifier
-                .padding(start = 32.dp, top = 142.dp)
-                .width(28.dp)
-                .height(244.dp)
-                .background(BarBg, RoundedCornerShape(8.dp))
-                .align(Alignment.TopStart)
-        )
+                .padding(start = 32.dp, top = 90.dp)
+                .width(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(modifier = Modifier.width(8.dp).height(52.dp).background(Color(0xFFFFE6E6)))
+            Box(
+                modifier = Modifier
+                    .width(28.dp)
+                    .height(244.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF69A0CB),
+                                Color(0xDBFB740E),
+                                Color(0xFFEB8638),
+                                Color(0xFFF3682C),
+                                Color(0xFFFF5A39)
+                            )
+                        )
+                    )
+            )
+        }
 
+        // Cards Scrollable Area
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 22.dp, end = 0.dp, top = 56.dp)
+                .padding(top = 150.dp, start = 84.dp, end = 24.dp)
+                .verticalScroll(rememberScrollState()),
         ) {
-            // ── Header ──
+            if (tasks.isEmpty()) {
+                TaskCard(
+                    title = "No Tasks",
+                    subtitle = "Tap + to add your first alarm",
+                    isFirst = true
+                )
+            } else {
+                tasks.sortedBy { it.dateTime }.forEachIndexed { index, task ->
+                    val ldt = java.time.LocalDateTime.parse(task.dateTime)
+                    val formatter = java.time.format.DateTimeFormatter.ofPattern("EEE, d MMM · h:mm a", java.util.Locale.US)
+                    val subtitle = ldt.format(formatter)
+                    
+                    TaskCard(
+                        title = task.title,
+                        subtitle = subtitle,
+                        isFirst = index == 0,
+                        onClick = { selectedTask = task }
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+                Spacer(modifier = Modifier.height(80.dp)) // padding for bottom FAB
+            }
+        }
+
+        // Top Gradient Fade
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(111.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.White, Color.Transparent)
+                    )
+                )
+        )
+
+        // Header Texts
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 22.dp, top = 35.dp)
+        ) {
             Text(
                 text = "Task Alarm",
                 fontFamily = DentonFontFamily,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.Medium,
                 fontSize = 36.sp,
-                color = TextMain,
+                color = Color(0xFF303030),
             )
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Your tasks, your deadlines.",
                 fontFamily = SatoshiFontFamily,
                 fontWeight = FontWeight.Medium,
                 fontSize = 12.sp,
-                color = TextGray,
+                color = Color(0xFF6C6C6C),
             )
-            Spacer(modifier = Modifier.height(36.dp))
+        }
 
-            // ── Cards (offset to the right, Figma: cards at x=84) ──
-            Column(
-                modifier = Modifier
-                    .padding(start = 62.dp, end = 24.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                if (tasks.isEmpty()) {
-                    TaskCard(
-                        title = "No Tasks",
-                        subtitle = "Tap + to add your first alarm",
-                        cardBrush = Brush.verticalGradient(
-                            listOf(Card1GradientTop, Card1GradientBottom),
-                        ),
-                    )
-                } else {
-                    tasks.sortedBy { it.dateTime }.forEachIndexed { index, task ->
-                        val ldt = java.time.LocalDateTime.parse(task.dateTime)
-                        val formatter = java.time.format.DateTimeFormatter.ofPattern("EEE, d MMM · h:mm a", java.util.Locale.US)
-                        val subtitle = ldt.format(formatter)
-
-                        TaskCard(
-                            title = task.title,
-                            subtitle = subtitle,
-                            cardBrush = if (index == 0) {
-                                Brush.verticalGradient(listOf(Card1GradientTop, Card1GradientBottom))
-                            } else {
-                                Brush.verticalGradient(listOf(CardGradientTop, CardGradientBottom))
-                            },
-                            onClick = { selectedTask = task }
-                        )
-                        Spacer(modifier = Modifier.height(20.dp))
-                    }
-                }
+        // Header Icons
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(end = 22.dp, top = 40.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Insights Bar Chart
+            Canvas(modifier = Modifier.size(24.dp).clickable { currentScreen = AppScreen.Patterns }) {
+                val barW = 2.dp.toPx()
+                val gap = 4.dp.toPx()
+                val startX = 4.dp.toPx()
+                // Bar 1
+                drawRect(Color.Black, topLeft = Offset(startX, 10.dp.toPx()), size = Size(barW, 10.dp.toPx()))
+                // Bar 2
+                drawRect(Color.Black, topLeft = Offset(startX + barW + gap, 4.dp.toPx()), size = Size(barW, 16.dp.toPx()))
+                // Bar 3
+                drawRect(Color.Black, topLeft = Offset(startX + (barW + gap) * 2, 8.dp.toPx()), size = Size(barW, 12.dp.toPx()))
+                // Bottom line
+                drawLine(Color.Black, Offset(2.dp.toPx(), 20.dp.toPx()), Offset(22.dp.toPx(), 20.dp.toPx()), strokeWidth = 1.dp.toPx())
+            }
+            // Notifications Bell
+            Canvas(modifier = Modifier.size(24.dp)) {
+                val strokeW = 1.5.dp.toPx()
+                // Bell dome
+                drawArc(
+                    color = Color.Black,
+                    startAngle = 180f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(4.dp.toPx(), 4.dp.toPx()),
+                    size = Size(16.dp.toPx(), 16.dp.toPx()),
+                    style = Stroke(width = strokeW)
+                )
+                // Bell sides
+                drawLine(Color.Black, Offset(4.dp.toPx(), 12.dp.toPx()), Offset(2.dp.toPx(), 18.dp.toPx()), strokeWidth = strokeW)
+                drawLine(Color.Black, Offset(20.dp.toPx(), 12.dp.toPx()), Offset(22.dp.toPx(), 18.dp.toPx()), strokeWidth = strokeW)
+                // Bell bottom
+                drawLine(Color.Black, Offset(1.dp.toPx(), 18.dp.toPx()), Offset(23.dp.toPx(), 18.dp.toPx()), strokeWidth = strokeW, cap = StrokeCap.Round)
+                // Clapper
+                drawArc(
+                    color = Color.Black,
+                    startAngle = 0f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(10.dp.toPx(), 18.dp.toPx()),
+                    size = Size(4.dp.toPx(), 4.dp.toPx()),
+                    style = Stroke(width = strokeW)
+                )
             }
         }
+
+        // FAB
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(24.dp)
+                .padding(end = 32.dp, bottom = 48.dp)
                 .size(60.dp)
-                // 1. Exact outer drop shadow from Figma: dy=4, stdDev=1.95, color=rgba(124,124,124,0.17)
-                .drawBehind {
-                    val d = this.density
-                    drawIntoCanvas { canvas ->
-                        val paint = android.graphics.Paint().apply {
-                            color = android.graphics.Color.TRANSPARENT
-                            setShadowLayer(
-                                1.95f * d, // blur
-                                0f * d,    // dx
-                                4f * d,    // dy
-                                android.graphics.Color.argb((0.17f * 255).toInt(), 124, 124, 124)
-                            )
-                        }
-                        canvas.nativeCanvas.drawCircle(size.width / 2, size.height / 2, size.width / 2, paint)
-                    }
-                }
-                // 2. Background fill: white to #F1F2F3
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(Color.White, Color(0xFFF1F2F3))
-                    ),
-                    shape = CircleShape
-                )
-                // 3. Border stroke: 0.8 width, linear gradient
-                .border(
-                    width = 0.8.dp,
-                    brush = Brush.linearGradient(
-                        colors = listOf(Color(0xFF969696), Color(0xFFF8F8F8).copy(alpha = 0.69f)),
-                        start = androidx.compose.ui.geometry.Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
-                        end = androidx.compose.ui.geometry.Offset(0f, 0f)
-                    ),
-                    shape = CircleShape
-                )
-                // 4. Inner shadow on the background: dx=4, dy=4, blur=2.5, spread=3, color=rgba(145,145,145,0.25)
-                .innerShadow(
-                    shape = CircleShape,
-                    color = Color(145, 145, 145, (0.25f * 255).toInt()),
-                    blur = 2.5.dp,
-                    offsetX = 4.dp,
-                    offsetY = 4.dp,
-                    spread = 3.dp
-                )
-                .clip(CircleShape)
+                .shadow(elevation = 12.dp, shape = CircleShape, spotColor = Color(0x33000000), ambientColor = Color(0x33000000))
+                .background(Color.White, CircleShape)
                 .clickable { showSheet = true },
             contentAlignment = Alignment.Center
         ) {
-            // 5. The exact Plus icon stroke
-            androidx.compose.foundation.Canvas(modifier = Modifier.size(60.dp)) {
-                val strokeWidth = 2.dp.toPx()
-                val path = androidx.compose.ui.graphics.Path().apply {
-                    moveTo(21f.dp.toPx(), 30f.dp.toPx())
-                    lineTo(39f.dp.toPx(), 30f.dp.toPx())
-                    moveTo(30f.dp.toPx(), 21f.dp.toPx())
-                    lineTo(30f.dp.toPx(), 39f.dp.toPx())
-                }
-                
-                // Base black stroke
-                drawPath(
-                    path = path,
-                    color = Color.Black,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(
-                        width = strokeWidth,
-                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                        join = androidx.compose.ui.graphics.StrokeJoin.Round
-                    )
-                )
-                // Tiny white inner shadow highlight (dx=0.4, dy=0.4, blur=0.25, white 0.43)
-                val highlightOffset = 0.4f.dp.toPx()
-                withTransform({
-                    translate(highlightOffset, highlightOffset)
-                }) {
-                    drawPath(
-                        path = path,
-                        color = Color.White.copy(alpha = 0.43f),
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(
-                            width = strokeWidth * 0.5f,
-                            cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                            join = androidx.compose.ui.graphics.StrokeJoin.Round
-                        )
-                    )
-                }
+            Canvas(modifier = Modifier.size(20.dp)) {
+                val strokeW = 1.5.dp.toPx()
+                drawLine(Color.Black, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), strokeWidth = strokeW, cap = StrokeCap.Round)
+                drawLine(Color.Black, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = strokeW, cap = StrokeCap.Round)
             }
         }
+
         if (showSheet) {
             NewTaskSheet(
                 onDismiss = { showSheet = false }
@@ -381,49 +481,384 @@ fun TaskAlarmHomeScreen() {
 private fun TaskCard(
     title: String,
     subtitle: String,
-    cardBrush: Brush = Brush.verticalGradient(
-        listOf(CardGradientTop, CardGradientBottom),
-    ),
-    onClick: () -> Unit = {},
+    isFirst: Boolean = false,
+    onClick: () -> Unit = {}
 ) {
-    Card(
+    val gradientBrush = if (isFirst) {
+        Brush.linearGradient(
+            colors = listOf(Color(0xFFFFB984), Color(0xFFFFCFDF)),
+            start = Offset(0f, 0f),
+            end = Offset(0f, Float.POSITIVE_INFINITY)
+        )
+    } else {
+        Brush.verticalGradient(
+            colors = listOf(Color.White, Color(0xFFE6E6E6))
+        )
+    }
+    
+    val borderModifier = if (!isFirst) {
+        Modifier.border(1.dp, Color(0xFFF2F2F2), RoundedCornerShape(24.dp))
+    } else Modifier
+    
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(24.dp),                              // Figma: rounded-[24px]
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-        border = BorderStroke(1.dp, CardBorder),                        // Figma: border #F2F2F2
-        elevation = CardDefaults.cardElevation(0.dp),                   // NO elevation / shadow
+            .height(104.dp)
+            .then(borderModifier)
+            .clip(RoundedCornerShape(24.dp))
+            .background(gradientBrush)
+            .clickable(onClick = onClick)
     ) {
+        // Inner shadow for first card
+        if (isFirst) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .border(
+                        width = 4.dp,
+                        color = Color.Black.copy(alpha = 0.05f),
+                        shape = RoundedCornerShape(24.dp)
+                    )
+                    .blur(8.dp)
+            )
+        }
+
+        Column(
+            modifier = Modifier.padding(start = 24.dp, top = 28.dp)
+        ) {
+            Text(
+                text = title,
+                fontFamily = DentonFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 36.sp,
+                color = Color.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                fontFamily = SatoshiFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 12.sp,
+                color = Color(0xFF6A7282),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        
+        // Next Icon
+        Image(
+            painter = painterResource(id = R.drawable.next_icon),
+            contentDescription = "Details",
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 24.dp, bottom = 24.dp)
+                .size(24.dp)
+        )
+    }
+}
+
+@Composable
+fun PatternsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val stats = remember { TaskStorage.getStats(context) }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0D0D0D))
+            .padding(horizontal = 24.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        // Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 56.dp, bottom = 24.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(Color(0xFF1A1A1A), RoundedCornerShape(10.dp))
+                    .clickable { onBack() },
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(modifier = Modifier.size(20.dp)) {
+                    val strokeW = 2.dp.toPx()
+                    val cx = size.width / 2f
+                    val cy = size.height / 2f
+                    val arm = 5.dp.toPx()
+                    val path = Path().apply {
+                        moveTo(cx + arm * 0.5f, cy - arm)
+                        lineTo(cx - arm * 0.5f, cy)
+                        lineTo(cx + arm * 0.5f, cy + arm)
+                    }
+                    drawPath(
+                        path = path,
+                        color = Color.White,
+                        style = Stroke(
+                            width = strokeW,
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round
+                        )
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = "Patterns",
+                fontFamily = DentonFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 28.sp,
+                letterSpacing = 0.3828.sp,
+                color = Color.White
+            )
+        }
+        
+        // 1. Stats Grid
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                StatCard(
+                    label = "Completed",
+                    value = stats.completedCount.toString(),
+                    barColor = Color(0xFF00C896)
+                )
+                StatCard(
+                    label = "Dropped",
+                    value = stats.droppedCount.toString(),
+                    barColor = Color(0xFFFF4D4D)
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                StatCard(
+                    label = "Rescheduled",
+                    value = stats.rescheduledCount.toString(),
+                    barColor = Color(0xFFF97316)
+                )
+                StatCard(
+                    label = "Avg. Delay",
+                    value = "${String.format(java.util.Locale.US, "%.1f", stats.avgDelayHours)}h",
+                    barColor = Color(0xFF2563EB)
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 2. Active Hours Bar Chart
+        Text(
+            text = "ACTIVE HOURS",
+            fontFamily = SatoshiFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = 12.sp,
+            color = Color(0xFF6A7282),
+            letterSpacing = (-0.36).sp
+        )
+        Spacer(modifier = Modifier.height(8.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(cardBrush, RoundedCornerShape(24.dp)),      // gradient fills card
+                .height(211.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF1A1A1A))
+                .padding(16.dp)
+        ) {
+            val maxVal = stats.activeHours.maxOrNull() ?: 1
+            val labels = listOf("6A", "8A", "10A", "12P", "2P", "4P", "6P", "8P", "10P")
+            
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                stats.activeHours.forEachIndexed { idx, value ->
+                    val isPeak = value == maxVal && maxVal > 0
+                    val barCol = if (isPeak) Color(0xFF00D9A6) else Color(0xFF00C896)
+                    val barHeightFraction = if (maxVal > 0) value.toFloat() / maxVal else 0f
+                    val heightDp = (barHeightFraction * 130).dp
+                    
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Bottom,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = if (value > 0) value.toString() else "",
+                            fontFamily = SatoshiFontFamily,
+                            fontSize = 10.sp,
+                            color = if (isPeak) Color(0xFF00D9A6) else Color(0xFF6A7282),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .width(8.dp)
+                                .height(heightDp.coerceAtLeast(4.dp))
+                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                .background(barCol)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = labels[idx],
+                            fontFamily = SatoshiFontFamily,
+                            fontSize = 10.sp,
+                            color = Color(0xFF6A7282),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 3. Most Dropped Tasks
+        Text(
+            text = "MOST DROPPED TASKS",
+            fontFamily = SatoshiFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = 12.sp,
+            color = Color(0xFF6A7282),
+            letterSpacing = (-0.36).sp
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(185.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF1A1A1A))
+                .padding(16.dp)
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 28.dp),     // Figma: text at x=24, y=28
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = title,
-                    fontFamily = DentonFontFamily,                      // Figma: Denton Test Medium
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 36.sp,                                   // Figma: text-[36px]
-                    color = TextMain,                                   // Figma: text-black
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = subtitle,
-                    fontFamily = FontFamily.SansSerif,                  // Figma: Satoshi Variable
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 12.sp,                                   // Figma: text-[12px]
-                    color = TextGray,                                   // Figma: #6A7282
-                    lineHeight = 18.sp,                                 // Figma: leading-[18px]
-                )
+                val droppedList = stats.droppedTasks.take(3)
+                if (droppedList.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No dropped tasks recorded",
+                            fontFamily = SatoshiFontFamily,
+                            fontSize = 14.sp,
+                            color = Color(0xFF6A7282)
+                        )
+                    }
+                } else {
+                    droppedList.forEach { info ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = info.title,
+                                fontFamily = SatoshiFontFamily,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 14.sp,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFFFF4D4D).copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "${info.count} drops",
+                                    fontFamily = SatoshiFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFFF4D4D)
+                                )
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(0.5.dp)
+                                .background(Color(0xFF2C2C2C))
+                        )
+                    }
+                }
             }
+        }
+        
+        Spacer(modifier = Modifier.height(32.dp))
+        
+        Text(
+            text = "Patterns don't lie. Use them.",
+            fontFamily = SatoshiFontFamily,
+            fontStyle = FontStyle.Italic,
+            fontWeight = FontWeight.Normal,
+            fontSize = 12.sp,
+            color = Color(0xFF6A7282),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 48.dp)
+        )
+    }
+}
+
+@Composable
+private fun StatCard(
+    label: String,
+    value: String,
+    barColor: Color
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(113.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF1A1A1A))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(3.dp)
+                .background(barColor)
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label.uppercase(java.util.Locale.US),
+                fontFamily = SatoshiFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 12.sp,
+                color = Color(0xFF6A7282),
+                letterSpacing = (-0.36).sp
+            )
+            Text(
+                text = value,
+                fontFamily = DentonFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 32.sp,
+                color = Color.White,
+                letterSpacing = (-0.96).sp
+            )
         }
     }
 }
@@ -432,6 +867,36 @@ private fun TaskCard(
 data class ColoredStroke(
     val points: List<Offset>
 )
+
+private data class SignatureBounds(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float
+) {
+    val width: Float = right - left
+    val height: Float = bottom - top
+}
+
+private fun List<ColoredStroke>.signatureBounds(): SignatureBounds? {
+    var left = Float.POSITIVE_INFINITY
+    var top = Float.POSITIVE_INFINITY
+    var right = Float.NEGATIVE_INFINITY
+    var bottom = Float.NEGATIVE_INFINITY
+    var hasPoints = false
+
+    for (stroke in this) {
+        for (point in stroke.points) {
+            hasPoints = true
+            left = min(left, point.x)
+            top = min(top, point.y)
+            right = max(right, point.x)
+            bottom = max(bottom, point.y)
+        }
+    }
+
+    return if (hasPoints) SignatureBounds(left, top, right, bottom) else null
+}
 
 private fun android.graphics.Path.addSmoothedStroke(points: List<Offset>) {
     if (points.isEmpty()) return
@@ -460,7 +925,10 @@ private fun signaturePaint(
     strokeWidthPx: Float,
     canvasWidth: Float,
     canvasHeight: Float,
-    density: Float
+    density: Float,
+    shadowAlpha: Float = 0.33f,
+    shadowBlur: Float = 2.3f,
+    shadowOffsetY: Float = 4f
 ): android.graphics.Paint {
     return android.graphics.Paint().apply {
         isAntiAlias = true
@@ -471,61 +939,282 @@ private fun signaturePaint(
         shader = android.graphics.LinearGradient(
             0f,
             0f,
-            canvasWidth,
-            canvasHeight,
-            intArrayOf(SignatureInkStart.toArgb(), SignatureInkEnd.toArgb()),
-            null,
+            canvasWidth * 0.72f,
+            canvasHeight * 1.04f,
+            intArrayOf(
+                SignatureInkHighlight.toArgb(),
+                SignatureInkStart.toArgb(),
+                SignatureInkMid.toArgb(),
+                SignatureInkEnd.toArgb()
+            ),
+            floatArrayOf(0f, 0.22f, 0.62f, 1f),
             android.graphics.Shader.TileMode.CLAMP
         )
         setShadowLayer(
-            2.3f * density,
+            shadowBlur * density,
             0f,
-            4f * density,
-            android.graphics.Color.argb((0.33f * 255).toInt(), 0, 124, 140)
+            shadowOffsetY * density,
+            SignatureShadowColor.copy(alpha = shadowAlpha).toArgb()
         )
     }
+}
+
+private fun drawSignatureStrokes(
+    nativeCanvas: android.graphics.Canvas,
+    strokes: List<ColoredStroke>,
+    strokeWidthPx: Float,
+    canvasWidth: Float,
+    canvasHeight: Float,
+    density: Float,
+    alpha: Float = 1f,
+    shadowAlpha: Float = 0.33f,
+    shadowBlur: Float = 2.3f,
+    shadowOffsetY: Float = 4f
+) {
+    for (coloredStroke in strokes) {
+        if (coloredStroke.points.size > 1) {
+            val paint = signaturePaint(
+                strokeWidthPx,
+                canvasWidth,
+                canvasHeight,
+                density,
+                shadowAlpha,
+                shadowBlur,
+                shadowOffsetY
+            ).apply {
+                this.alpha = (alpha.coerceIn(0f, 1f) * 255).toInt()
+            }
+            val path = android.graphics.Path().apply {
+                addSmoothedStroke(coloredStroke.points)
+            }
+            nativeCanvas.drawPath(path, paint)
+        }
+    }
+}
+
+private fun drawCenteredSignature(
+    nativeCanvas: android.graphics.Canvas,
+    strokes: List<ColoredStroke>,
+    canvasWidth: Float,
+    canvasHeight: Float,
+    density: Float,
+    progress: Float
+) {
+    val bounds = strokes.signatureBounds() ?: return
+    if (bounds.width <= 0f || bounds.height <= 0f) return
+
+    val safeProgress = progress.coerceIn(0f, 1f)
+    val targetWidth = canvasWidth * 0.68f
+    val targetHeight = canvasHeight * 0.26f
+    val scale = min(targetWidth / bounds.width, targetHeight / bounds.height)
+        .coerceIn(0.18f, 2.6f)
+    val revealScale = 0.86f + (0.14f * safeProgress)
+    val finalScale = scale * revealScale
+    val centerX = canvasWidth * 0.5f
+    val centerY = canvasHeight * 0.5f
+    val signatureCenterX = (bounds.left + bounds.right) / 2f
+    val signatureCenterY = (bounds.top + bounds.bottom) / 2f
+
+    nativeCanvas.save()
+    nativeCanvas.translate(centerX, centerY)
+    nativeCanvas.scale(finalScale, finalScale)
+    nativeCanvas.translate(-signatureCenterX, -signatureCenterY)
+
+    drawSignatureStrokes(
+        nativeCanvas = nativeCanvas,
+        strokes = strokes,
+        strokeWidthPx = (SignatureSavedStrokeDp * density) / finalScale,
+        canvasWidth = canvasWidth / finalScale,
+        canvasHeight = canvasHeight / finalScale,
+        density = density,
+        alpha = safeProgress,
+        shadowAlpha = SignatureSavedShadowAlpha,
+        shadowBlur = SignatureSavedShadowBlur,
+        shadowOffsetY = SignatureSavedShadowOffsetY
+    )
+
+    nativeCanvas.restore()
 }
 
 @Composable
 fun SigningScreen(
     task: TaskAlarm,
-    onProceed: () -> Unit
+    onProceed: () -> Unit,
+    onSnooze: (TaskAlarm) -> Unit = {}
 ) {
     BackHandler(enabled = true) {
         // Do nothing - user must sign to unlock the app
     }
 
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val configuration = LocalConfiguration.current
+    val coroutineScope = rememberCoroutineScope()
     var totalDrawingLength by remember { mutableStateOf(0f) }
     val currentStroke = remember { mutableStateOf<List<Offset>>(emptyList()) }
     val strokes = remember { mutableStateListOf<ColoredStroke>() }
     val localDensity = LocalDensity.current
     var isCardFlipped by remember { mutableStateOf(false) }
+    var glareTiltY by remember { mutableStateOf(0f) }
 
-    val isThresholdMet = totalDrawingLength > 1000f
+    var timeString by remember { mutableStateOf("") }
+    var amPmString by remember { mutableStateOf("") }
+    val cardDragOffset = remember { Animatable(0f) }
+    var rawSnoozeDrag by remember { mutableStateOf(0f) }
+    var isSnoozeDrawerOpen by remember { mutableStateOf(false) }
+    var showSnoozeConfirmation by remember { mutableStateOf(false) }
+    var snoozeConfirmationText by remember { mutableStateOf("") }
+    var hasSnoozedAway by remember { mutableStateOf(false) }
+    val screenHeightPx = with(localDensity) { configuration.screenHeightDp.dp.toPx() }
+    val snoozeThresholdPx = screenHeightPx / 3f
+    val canSnooze = task.snoozeCount < 2
+    val snoozePrompt = if (task.snoozeCount == 0) {
+        "Need 10 mins\nmore?"
+    } else {
+        "Last chance.\n10 mins more."
+    }
+    val snoozeRevealProgress by animateFloatAsState(
+        targetValue = if (canSnooze && (rawSnoozeDrag > 8f || isSnoozeDrawerOpen)) {
+            (cardDragOffset.value / (snoozeThresholdPx * 0.6f)).coerceIn(0f, 1f)
+        } else {
+            0f
+        },
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "snoozeRevealProgress"
+    )
+    val cardDragProgress = (cardDragOffset.value / (snoozeThresholdPx * 0.6f)).coerceIn(0f, 1f)
+
+    fun closeSnoozeDrawer() {
+        isSnoozeDrawerOpen = false
+        rawSnoozeDrag = 0f
+        coroutineScope.launch {
+            cardDragOffset.animateTo(
+                0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        }
+    }
+
+    fun confirmSnooze() {
+        if (!canSnooze || hasSnoozedAway) return
+        hasSnoozedAway = true
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        val snoozeTime = java.time.LocalDateTime.now().plusMinutes(10)
+        snoozeConfirmationText = "See you at ${
+            snoozeTime.format(
+                java.time.format.DateTimeFormatter.ofPattern(
+                    "h mm a",
+                    java.util.Locale.US
+                )
+            )
+        }"
+        showSnoozeConfirmation = true
+        closeSnoozeDrawer()
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = java.time.LocalTime.now()
+            timeString = now.format(java.time.format.DateTimeFormatter.ofPattern("h:mm"))
+            amPmString = now.format(java.time.format.DateTimeFormatter.ofPattern("a"))
+            delay(1000)
+        }
+    }
+
+    LaunchedEffect(showSnoozeConfirmation) {
+        if (showSnoozeConfirmation) {
+            delay(2000)
+            showSnoozeConfirmation = false
+            onSnooze(
+                task.copy(
+                    dateTime = java.time.LocalDateTime.now().plusMinutes(10).toString(),
+                    snoozeCount = task.snoozeCount + 1
+                )
+            )
+        }
+    }
+
+    val isThresholdMet by remember { derivedStateOf { totalDrawingLength > 1000f } }
 
     // ─── Signature touch response ──────────────────────────────────────────
-    val isCardTouched = currentStroke.value.isNotEmpty()
-    val isSignatureComplete = isThresholdMet && !isCardTouched
+    val isCardTouched by remember { derivedStateOf { currentStroke.value.isNotEmpty() } }
+    val isSignatureComplete by remember { derivedStateOf { isThresholdMet && !isCardTouched } }
     val cardTouchGlowProgress by animateFloatAsState(
         targetValue = if (isCardTouched) 1f else 0f,
-        animationSpec = tween(durationMillis = if (isCardTouched) 140 else 420),
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = if (isCardTouched) Spring.StiffnessMedium else Spring.StiffnessLow
+        ),
         label = "cardTouchGlow"
     )
     val cardFlipRotation by animateFloatAsState(
         targetValue = if (isCardFlipped) 180f else 0f,
-        animationSpec = tween(
-            durationMillis = 720,
-            easing = FastOutSlowInEasing
+        animationSpec = spring(
+            dampingRatio = 0.74f,
+            stiffness = Spring.StiffnessMediumLow
         ),
         label = "cardFlipRotation"
     )
     val cardFlipDepth = 1f - (abs(cardFlipRotation - 90f) / 90f).coerceIn(0f, 1f)
     val isCardBackVisible = cardFlipRotation >= 90f
+    val glareAlpha = 1f - (cardFlipRotation / 90f).coerceIn(0f, 1f)
+    val signatureRevealProgress by animateFloatAsState(
+        targetValue = if (isSignatureComplete && !isCardBackVisible) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "signatureRevealProgress"
+    )
+
+    LaunchedEffect(isSignatureComplete) {
+        if (isSignatureComplete && isCardFlipped) {
+            delay(360)
+            isCardFlipped = false
+        }
+    }
 
     // ─── Gyroscope parallax ────────────────────────────────────────────────
-    var rotationX by remember { mutableStateOf(0f) }
-    var rotationY by remember { mutableStateOf(0f) }
+    val rotationXState = remember { mutableFloatStateOf(0f) }
+    val rotationYState = remember { mutableFloatStateOf(0f) }
+    val glareOffsetX by animateFloatAsState(
+        targetValue = rotationYState.floatValue * 4f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessVeryLow
+        ),
+        label = "glareOffsetX"
+    )
+    val glareOffsetY by animateFloatAsState(
+        targetValue = rotationXState.floatValue * 2.5f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessVeryLow
+        ),
+        label = "glareOffsetY"
+    )
+    val backgroundGlareOffsetX by animateFloatAsState(
+        targetValue = rotationYState.floatValue * 1.6f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = 8f
+        ),
+        label = "backgroundGlareOffsetX"
+    )
+    val backgroundGlareOffsetY by animateFloatAsState(
+        targetValue = rotationXState.floatValue * 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = 8f
+        ),
+        label = "backgroundGlareOffsetY"
+    )
 
     DisposableEffect(Unit) {
         val sensorManager = context.getSystemService(
@@ -540,20 +1229,54 @@ fun SigningScreen(
         val listener = object : SensorEventListener {
             private val rotationMatrix = FloatArray(9)
             private val orientationAngles = FloatArray(3)
+            private var initialPitch: Float? = null
+            private var initialRoll: Float? = null
+            private var filteredTiltX = 0f
+            private var filteredTiltY = 0f
+            private var lastTiltUpdateNanos = 0L
+
+            private fun getAngleDifference(target: Float, current: Float): Float {
+                var diff = target - current
+                while (diff < -180f) diff += 360f
+                while (diff > 180f) diff -= 360f
+                return diff
+            }
 
             override fun onSensorChanged(event: SensorEvent) {
+                if (
+                    lastTiltUpdateNanos != 0L &&
+                    event.timestamp - lastTiltUpdateNanos < CARD_TILT_UPDATE_INTERVAL_NANOS
+                ) {
+                    return
+                }
+                lastTiltUpdateNanos = event.timestamp
+
                 SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
                 SensorManager.getOrientation(rotationMatrix, orientationAngles)
 
                 val pitchDegrees = Math.toDegrees(orientationAngles[1].toDouble()).toFloat()
                 val rollDegrees = Math.toDegrees(orientationAngles[2].toDouble()).toFloat()
-                val targetRotationX = (pitchDegrees * CARD_TILT_INTENSITY)
-                    .coerceIn(-CARD_TILT_MAX_DEGREES, CARD_TILT_MAX_DEGREES)
-                val targetRotationY = (-rollDegrees * CARD_TILT_INTENSITY)
-                    .coerceIn(-CARD_TILT_MAX_DEGREES, CARD_TILT_MAX_DEGREES)
 
-                rotationX += (targetRotationX - rotationX) * CARD_TILT_RESPONSE
-                rotationY += (targetRotationY - rotationY) * CARD_TILT_RESPONSE
+                if (initialPitch == null) {
+                    initialPitch = pitchDegrees
+                    initialRoll = rollDegrees
+                }
+
+                val relPitch = getAngleDifference(pitchDegrees, initialPitch ?: pitchDegrees)
+                val relRoll = getAngleDifference(rollDegrees, initialRoll ?: rollDegrees)
+
+                val rawTiltX = ((relPitch * CARD_TILT_INTENSITY) / CARD_TILT_MAX_DEGREES)
+                    .coerceIn(-1f, 1f)
+                val rawTiltY = ((-relRoll * CARD_TILT_INTENSITY) / CARD_TILT_MAX_DEGREES)
+                    .coerceIn(-1f, 1f)
+
+                filteredTiltX = (filteredTiltX * CARD_TILT_LOW_PASS_KEEP) +
+                    (rawTiltX * CARD_TILT_LOW_PASS_NEW)
+                filteredTiltY = (filteredTiltY * CARD_TILT_LOW_PASS_KEEP) +
+                    (rawTiltY * CARD_TILT_LOW_PASS_NEW)
+                
+                rotationXState.floatValue = (filteredTiltX.coerceIn(-1f, 1f) * CARD_TILT_MAX_DEGREES)
+                rotationYState.floatValue = (filteredTiltY.coerceIn(-1f, 1f) * CARD_TILT_MAX_DEGREES)
             }
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
@@ -569,22 +1292,6 @@ fun SigningScreen(
         }
     }
 
-    val animatedRotationX by animateFloatAsState(
-        targetValue = rotationX,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "rotationX"
-    )
-    val animatedRotationY by animateFloatAsState(
-        targetValue = rotationY,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "rotationY"
-    )
     val signedStackProgress by animateFloatAsState(
         targetValue = if (isSignatureComplete) 1f else 0f,
         animationSpec = spring(
@@ -593,53 +1300,204 @@ fun SigningScreen(
         ),
         label = "signedStackProgress"
     )
-    val cardTiltX = animatedRotationX * (1f - signedStackProgress)
-    val cardTiltY = animatedRotationY * (1f - signedStackProgress)
     val isActionEnabled = !isCardFlipped || isSignatureComplete
+    val alarmCardShape = RoundedCornerShape(30.dp)
 
-    // Animate button colors
-    val buttonBgColor by animateColorAsState(
-        targetValue = if (isActionEnabled) Color.Black else Color(0xFFE2E2E2),
-        animationSpec = tween(durationMillis = 300),
-        label = "buttonBgColor"
-    )
-    val buttonTextColor by animateColorAsState(
-        targetValue = if (isActionEnabled) Color.White else Color(0xFF888888),
-        animationSpec = tween(durationMillis = 300),
-        label = "buttonTextColor"
-    )
-
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.White)
-            .padding(top = 60.dp, bottom = 40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Task Title — left-aligned with padding
-        Text(
-            text = task.title,
-            fontFamily = DentonFontFamily,
-            fontWeight = FontWeight.Medium,
-            fontSize = 36.sp,
-            color = Color.Black,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Image(
+            painter = painterResource(id = R.drawable.glare_for_card),
+            contentDescription = null,
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 32.dp)
+                .align(Alignment.Center)
+                .offset(x = 34.dp, y = 84.dp)
+                .fillMaxWidth(1.9f)
+                .height(680.dp)
+                .graphicsLayer {
+                    alpha = glareAlpha * 0.82f
+                    translationX = backgroundGlareOffsetX.dp.toPx()
+                    translationY = backgroundGlareOffsetY.dp.toPx()
+                }
+                .safeBlur(8.dp, BlurredEdgeTreatment.Unbounded),
+            contentScale = ContentScale.FillBounds
         )
 
-        Spacer(modifier = Modifier.height(40.dp))
+        if (canSnooze) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(top = 118.dp)
+                    .graphicsLayer {
+                        alpha = snoozeRevealProgress
+                        translationY = (-24).dp.toPx() * (1f - snoozeRevealProgress)
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 620.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = snoozePrompt,
+                        fontFamily = DentonFontFamily,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 48.sp,
+                        lineHeight = 52.sp,
+                        color = Color(0xFFDCDCDC),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = snoozePrompt,
+                        fontFamily = DentonFontFamily,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 48.sp,
+                        lineHeight = 52.sp,
+                        color = Color(0xFFC0C0C0),
+                        textAlign = TextAlign.Center,
+                        style = LocalTextStyle.current.copy(
+                            shadow = Shadow(
+                                color = Color(0xFF4A4A4A).copy(alpha = 0.32f),
+                                offset = Offset(1f, 1f),
+                                blurRadius = 2.6f
+                            )
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .offset(x = 2.dp, y = 2.dp)
+                    )
+                    Text(
+                        text = snoozePrompt,
+                        fontFamily = DentonFontFamily,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 48.sp,
+                        lineHeight = 52.sp,
+                        color = Color(0xFFF5F5F5),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .offset(x = (-1).dp, y = (-1).dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(22.dp))
+                Box(
+                    modifier = Modifier
+                        .size(94.dp)
+                        .shadow(
+                            elevation = 15.dp,
+                            shape = CircleShape,
+                            ambientColor = Color(0xFF717171).copy(alpha = 0.5f),
+                            spotColor = Color(0xFF717171).copy(alpha = 0.5f)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.snooze_button),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(
+                                enabled = canSnooze && isSnoozeDrawerOpen && !hasSnoozedAway
+                            ) {
+                                confirmSnooze()
+                            },
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = showSnoozeConfirmation,
+            enter = fadeIn(tween(220)),
+            exit = fadeOut(tween(420)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 92.dp)
+        ) {
+            Text(
+                text = snoozeConfirmationText,
+                fontFamily = SatoshiFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 16.sp,
+                color = Color(0xFF3A3A3A),
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .background(Color.White.copy(alpha = 0.72f), RoundedCornerShape(18.dp))
+                    .padding(horizontal = 18.dp, vertical = 10.dp)
+            )
+        }
 
         // White signing card — centered, with flip, depth, and gyroscope parallax
         Box(
             modifier = Modifier
+                .align(Alignment.Center)
                 .fillMaxWidth()
-                .height(456.dp)
-                .padding(horizontal = 18.dp),
+                .height(488.dp)
+                .graphicsLayer {
+                    translationY = cardDragOffset.value
+                }
+                .drawBehind {
+                    drawIntoCanvas { canvas ->
+                        val blurPx = 15.dp.toPx()
+                        val radiusPx = 30.dp.toPx()
+                        val insetX = 18.dp.toPx()
+                        val insetY = 16.dp.toPx()
+                        val paint = android.graphics.Paint().apply {
+                            isAntiAlias = true
+                            color = android.graphics.Color.argb(1, 113, 113, 113)
+                            setShadowLayer(
+                                blurPx,
+                                0f,
+                                2.dp.toPx(),
+                                android.graphics.Color.argb((0.5f * 255).toInt(), 113, 113, 113)
+                            )
+                        }
+                        canvas.nativeCanvas.drawRoundRect(
+                            android.graphics.RectF(
+                                insetX,
+                                insetY,
+                                size.width - insetX,
+                                size.height - insetY
+                            ),
+                            radiusPx,
+                            radiusPx,
+                            paint
+                        )
+                    }
+                }
+                .padding(horizontal = 18.dp, vertical = 16.dp),
             contentAlignment = Alignment.Center
         ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        val tiltX = rotationXState.floatValue * (1f - signedStackProgress)
+                        val tiltY = rotationYState.floatValue * (1f - signedStackProgress)
+                        this.rotationX = tiltX - (cardFlipDepth * 3f)
+                        this.rotationY = tiltY + if (isCardBackVisible) {
+                            cardFlipRotation - 180f
+                        } else {
+                            cardFlipRotation
+                        }
+                        val depthScale = 1f - (cardFlipDepth * 0.035f)
+                        scaleX = depthScale + (cardTouchGlowProgress * 0.008f)
+                        scaleY = depthScale + (cardTouchGlowProgress * 0.008f)
+                        translationY = cardFlipDepth * 10.dp.toPx()
+                        cameraDistance = 12f * density
+                        alpha = 1f - signedStackProgress * 0.25f
+                        shape = alarmCardShape
+                        clip = false
+                    }
+            )
+
             if (signedStackProgress > 0.01f) {
                 Box(
                     modifier = Modifier
@@ -653,11 +1511,11 @@ fun SigningScreen(
                             alpha = 0.34f * signedStackProgress
                             cameraDistance = 12f * density
                         }
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xFFE9F8F8), RoundedCornerShape(24.dp))
+                        .clip(alarmCardShape)
+                        .background(Color(0xFFE9F8F8), alarmCardShape)
                         .border(
                             BorderStroke(1.dp, CardTouchGlow.copy(alpha = 0.22f)),
-                            RoundedCornerShape(24.dp)
+                            alarmCardShape
                         )
                 )
                 Box(
@@ -671,9 +1529,9 @@ fun SigningScreen(
                             rotationZ = 5f * signedStackProgress
                             alpha = 0.18f * signedStackProgress
                         }
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xFFF0F0F0), RoundedCornerShape(24.dp))
-                        .border(BorderStroke(1.dp, CardBorder), RoundedCornerShape(24.dp))
+                        .clip(alarmCardShape)
+                        .background(Color(0xFFF0F0F0), alarmCardShape)
+                        .border(BorderStroke(1.dp, CardBorder), alarmCardShape)
                 )
             }
 
@@ -682,8 +1540,10 @@ fun SigningScreen(
                     .matchParentSize()
                 // Parallax tilt from gyroscope
                 .graphicsLayer {
-                    this.rotationX = cardTiltX - (cardFlipDepth * 3f)
-                    this.rotationY = cardTiltY + if (isCardBackVisible) {
+                    val tiltX = rotationXState.floatValue * (1f - signedStackProgress)
+                    val tiltY = rotationYState.floatValue * (1f - signedStackProgress)
+                    this.rotationX = tiltX - (cardFlipDepth * 3f)
+                    this.rotationY = tiltY + if (isCardBackVisible) {
                         cardFlipRotation - 180f
                     } else {
                         cardFlipRotation
@@ -693,112 +1553,305 @@ fun SigningScreen(
                     scaleY = depthScale + (cardTouchGlowProgress * 0.008f)
                     translationY = cardFlipDepth * 10.dp.toPx()
                     cameraDistance = 12f * density
+                    shape = alarmCardShape
+                    clip = false
                 }
-                // Figma shadow: 0px 0px 15.7px 0px rgba(112,112,112,0.25)
-                .drawBehind {
-                    val d = this.density
-                    drawIntoCanvas { canvas ->
-                        if (cardTouchGlowProgress > 0.01f) {
-                            val glowPaint = android.graphics.Paint().apply {
-                                color = android.graphics.Color.WHITE
-                                setShadowLayer(
-                                    (18f + 18f * cardTouchGlowProgress) * d,
-                                    0f,
-                                    0f,
-                                    android.graphics.Color.argb(
-                                        (0.42f * cardTouchGlowProgress * 255).toInt(),
-                                        77,
-                                        217,
-                                        232
-                                    )
-                                )
-                            }
-                            val glowRect = android.graphics.RectF(0f, 0f, size.width, size.height)
-                            canvas.nativeCanvas.drawRoundRect(glowRect, 24.dp.toPx(), 24.dp.toPx(), glowPaint)
-                        }
-
-                        val paint = android.graphics.Paint().apply {
-                            color = android.graphics.Color.WHITE
-                            setShadowLayer(
-                                15.7f * d,
-                                0f * d,
-                                0f * d,
-                                android.graphics.Color.argb((0.25f * 255).toInt(), 112, 112, 112)
-                            )
-                        }
-                        val rect = android.graphics.RectF(0f, 0f, size.width, size.height)
-                        canvas.nativeCanvas.drawRoundRect(rect, 24.dp.toPx(), 24.dp.toPx(), paint)
-                    }
-                }
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color.White, RoundedCornerShape(24.dp))
-                .border(BorderStroke(1.dp, CardBorder), RoundedCornerShape(24.dp))
+                .clip(alarmCardShape)
+                .background(Color.White, alarmCardShape)
+                .border(BorderStroke(0.7.dp, Color(0xFFF6F7F8)), alarmCardShape)
             ) {
                 if (!isCardBackVisible) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .clickable(enabled = !isThresholdMet) { isCardFlipped = true }
-                            .pointerInput(Unit) {
-                                var totalDragX = 0f
-                                detectDragGestures(
-                                    onDragStart = {
-                                        totalDragX = 0f
-                                    },
-                                    onDrag = { change, dragAmount ->
-                                        totalDragX += dragAmount.x
-                                        if (!isThresholdMet && abs(totalDragX) > 24f) {
-                                            isCardFlipped = true
-                                        }
-                                        change.consume()
-                                    }
-                                )
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (isThresholdMet) {
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                val strokeWidthPx = 8.dp.toPx()
-                                drawIntoCanvas { canvas ->
-                                    val nativeCanvas = canvas.nativeCanvas
-                                    for (coloredStroke in strokes) {
-                                        if (coloredStroke.points.size > 1) {
-                                            val paint = signaturePaint(
-                                                strokeWidthPx,
-                                                size.width,
-                                                size.height,
-                                                density
-                                            )
-                                            val path = android.graphics.Path().apply {
-                                                addSmoothedStroke(coloredStroke.points)
-                                            }
-                                            nativeCanvas.drawPath(path, paint)
-                                        }
-                                    }
+                            .clickable {
+                                if (isThresholdMet) {
+                                    onProceed()
+                                } else {
+                                    isCardFlipped = true
                                 }
                             }
-                            Text(
-                                text = "Autograph saved",
-                                fontFamily = DentonFontFamily,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 34.sp,
-                                color = Color.Black,
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(start = 24.dp, top = 26.dp)
-                            )
-                        } else {
-                            Text(
-                                text = "Give us your autograph if you're serious about a business analyst career.",
-                                fontFamily = DentonFontFamily,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 30.sp,
-                                lineHeight = 34.sp,
-                                color = Color.Black,
+	                            .pointerInput(Unit) {
+	                                var totalDragX = 0f
+                                    var totalDragY = 0f
+	                                detectDragGestures(
+	                                    onDragStart = {
+	                                        totalDragX = 0f
+	                                            totalDragY = 0f
+	                                            rawSnoozeDrag = if (isSnoozeDrawerOpen) snoozeThresholdPx else 0f
+	                                    },
+	                                        onDragEnd = {
+                                            if (canSnooze && rawSnoozeDrag > snoozeThresholdPx) {
+                                                isSnoozeDrawerOpen = true
+                                                rawSnoozeDrag = snoozeThresholdPx
+                                                coroutineScope.launch {
+                                                    cardDragOffset.animateTo(
+                                                        snoozeThresholdPx * 0.6f,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                            stiffness = Spring.StiffnessMediumLow
+                                                        )
+                                                    )
+                                                }
+                                            } else {
+                                                closeSnoozeDrawer()
+                                            }
+	                                        },
+	                                        onDragCancel = {
+	                                            closeSnoozeDrawer()
+	                                        },
+	                                    onDrag = { change, dragAmount ->
+	                                        totalDragX += dragAmount.x
+                                            totalDragY += dragAmount.y
+                                            if (
+	                                                !isCardFlipped &&
+	                                                dragAmount.y > 0f &&
+	                                                abs(totalDragY) > abs(totalDragX)
+	                                            ) {
+                                                isSnoozeDrawerOpen = false
+	                                                rawSnoozeDrag = (rawSnoozeDrag + dragAmount.y).coerceAtLeast(0f)
+	                                                coroutineScope.launch {
+	                                                    cardDragOffset.snapTo(rawSnoozeDrag * 0.6f)
+	                                                }
+                                            } else if (
+                                                !isCardFlipped &&
+                                                isSnoozeDrawerOpen &&
+                                                dragAmount.y < 0f &&
+                                                abs(totalDragY) > abs(totalDragX)
+                                            ) {
+                                                rawSnoozeDrag = (rawSnoozeDrag + dragAmount.y).coerceAtLeast(0f)
+                                                coroutineScope.launch {
+                                                    cardDragOffset.snapTo(rawSnoozeDrag * 0.6f)
+                                                }
+	                                            } else if (!isThresholdMet && abs(totalDragX) > 24f) {
+	                                            isCardFlipped = true
+	                                        }
+	                                        change.consume()
+	                                    }
+                                )
+                            }
+                    ) {
+                        // Card Front Content
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(top = 102.dp, bottom = 36.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Top
+                        ) {
+                            // 1. Time Row
+                            Row(
+                                verticalAlignment = Alignment.Bottom,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+	                                Box {
+	                                    Text(
+	                                        text = timeString,
+	                                        fontFamily = DentonFontFamily,
+	                                        fontWeight = FontWeight.Medium,
+	                                        fontSize = 104.sp,
+	                                        lineHeight = 96.sp,
+	                                        style = LocalTextStyle.current.copy(
+	                                            brush = Brush.horizontalGradient(
+	                                                colorStops = arrayOf(
+	                                                    0.0f to Color(0xFF211C1C),
+	                                                    0.70f to Color(0xFF211C1C),
+	                                                    1.0f to Color(0xFF6D5757)
+	                                                )
+		                                            ),
+		                                            shadow = Shadow(
+		                                                color = Color.Black.copy(alpha = 0.52f),
+		                                                offset = Offset(0f, 2.4f),
+		                                                blurRadius = 3.2f
+		                                            )
+		                                        )
+		                                    )
+	                                    Text(
+	                                        text = timeString,
+	                                        fontFamily = DentonFontFamily,
+	                                        fontWeight = FontWeight.Medium,
+	                                        fontSize = 104.sp,
+	                                        lineHeight = 96.sp,
+	                                        color = Color(0xFFC5C5C5),
+	                                        style = LocalTextStyle.current.copy(
+		                                            shadow = Shadow(
+		                                                color = Color(0xFFC5C5C5),
+		                                                offset = Offset(1.1f, 1.1f),
+		                                                blurRadius = 2.2f
+		                                            )
+		                                        ),
+		                                        modifier = Modifier
+		                                            .offset(x = 1.1.dp, y = 1.1.dp)
+		                                            .graphicsLayer {
+		                                                alpha = 0.32f
+		                                            }
+		                                    )
+	                                }
+			                                Spacer(modifier = Modifier.width(2.dp))
+			                                Text(
+		                                    text = amPmString,
+		                                    fontFamily = DentonFontFamily,
+		                                    fontWeight = FontWeight.Medium,
+		                                    fontSize = 26.sp,
+                                    color = Color(0xFF545454),
+                                    style = LocalTextStyle.current.copy(
+                                        shadow = Shadow(
+                                            color = Color(0xFF262626).copy(alpha = 0.43f),
+                                            offset = Offset(0f, 1f),
+	                                            blurRadius = 1.1f
+	                                        )
+	                                    ),
+			                                    modifier = Modifier
+                                                    .padding(bottom = 18.dp)
+                                                    .offset(x = (-2).dp, y = 1.dp)
+			                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(26.dp))
+
+                            // 2. Leaf-flanked title
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 30.dp),
-                                textAlign = TextAlign.Center
+                                    .padding(horizontal = 24.dp)
+                            ) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.image_leaf_final),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(width = 39.dp, height = 59.dp)
+                                        .graphicsLayer {
+                                            scaleX = -1f
+                                        }
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = task.title,
+                                    fontFamily = DentonFontFamily,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 36.sp,
+                                    lineHeight = 34.sp,
+                                    color = Color(0xFF211C1C),
+                                    textAlign = TextAlign.Center,
+                                    style = LocalTextStyle.current.copy(
+                                        shadow = Shadow(
+                                            color = Color.Black.copy(alpha = 0.36f),
+                                            offset = Offset(0f, 2f),
+                                            blurRadius = 2.3f
+                                        )
+                                    ),
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Image(
+                                    painter = painterResource(id = R.drawable.image_leaf_final),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(width = 39.dp, height = 59.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // 3. Description
+                            Text(
+                                text = task.description,
+                                fontFamily = SatoshiFontFamily,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 17.sp,
+                                lineHeight = 24.sp,
+                                color = Color(0xFFA7A7A7),
+                                textAlign = TextAlign.Center,
+                                style = LocalTextStyle.current.copy(
+                                    shadow = Shadow(
+                                        color = Color.White.copy(alpha = 0.65f),
+                                        offset = Offset(0f, 1f),
+                                        blurRadius = 1.4f
+                                    )
+                                ),
+                                modifier = Modifier
+                                    .widthIn(max = 292.dp)
+                                    .padding(horizontal = 12.dp),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        // Watermark bottom end
+                        Text(
+                            text = if (isThresholdMet) "~Tap to proceed" else "~Tap to flip",
+                            fontFamily = DentonFontFamily,
+                            fontWeight = FontWeight.Light,
+                            fontSize = 16.sp,
+                            color = Color(0xFF2C2C2C),
+                            style = LocalTextStyle.current.copy(
+                                shadow = Shadow(
+                                    color = Color(0xFF757575).copy(alpha = 0.43f),
+                                    offset = Offset(0f, 0.8f),
+                                    blurRadius = 0.8f
+                                )
+                            ),
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 40.dp, bottom = 34.dp)
+                        )
+
+                        // Completed signature
+                        if (isThresholdMet) {
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                drawIntoCanvas { canvas ->
+                                    drawCenteredSignature(
+                                        nativeCanvas = canvas.nativeCanvas,
+                                        strokes = strokes,
+                                        canvasWidth = size.width,
+                                        canvasHeight = size.height,
+                                        density = density,
+                                        progress = signatureRevealProgress
+                                    )
+                                }
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .graphicsLayer {
+                                    alpha = cardDragProgress
+                                }
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        colorStops = arrayOf(
+                                            0.0f to Color.White.copy(alpha = 0.66f),
+                                            0.32f to Color.White.copy(alpha = 0.34f),
+                                            0.62f to Color.White.copy(alpha = 0.12f),
+                                            1.0f to Color.Transparent
+                                        )
+                                    )
+                                )
+                        )
+
+                        Box(
+			                            modifier = Modifier
+			                                .matchParentSize()
+			                                .graphicsLayer {
+			                                    alpha = glareAlpha * 0.48f
+			                                }
+                                .clip(alarmCardShape)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.glare_for_card),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .fillMaxWidth(1.58f)
+                                    .fillMaxHeight(1.28f)
+                                    .graphicsLayer {
+                                        translationX = glareOffsetX.dp.toPx()
+                                        translationY = glareOffsetY.dp.toPx()
+                                    },
+                                contentScale = ContentScale.FillBounds
                             )
                         }
                     }
@@ -836,40 +1889,37 @@ fun SigningScreen(
                                 )
                             }
                     ) {
-                        val strokeWidthPx = 8.dp.toPx()
+                        val strokeWidthPx = SignatureLiveStrokeDp.dp.toPx()
 
                         drawIntoCanvas { canvas ->
                             val nativeCanvas = canvas.nativeCanvas
 
-                            // Draw completed strokes with one consistent signature gradient
-                            for (coloredStroke in strokes) {
-                                if (coloredStroke.points.size > 1) {
-                                    val paint = signaturePaint(
-                                        strokeWidthPx,
-                                        size.width,
-                                        size.height,
-                                        density
-                                    )
-                                    val path = android.graphics.Path().apply {
-                                        addSmoothedStroke(coloredStroke.points)
-                                    }
-                                    nativeCanvas.drawPath(path, paint)
-                                }
-                            }
+                            drawSignatureStrokes(
+                                nativeCanvas = nativeCanvas,
+                                strokes = strokes,
+                                strokeWidthPx = strokeWidthPx,
+                                canvasWidth = size.width,
+                                canvasHeight = size.height,
+                                density = density,
+                                shadowAlpha = SignatureLiveShadowAlpha,
+                                shadowBlur = SignatureLiveShadowBlur,
+                                shadowOffsetY = SignatureLiveShadowOffsetY
+                            )
 
                             // Draw current stroke
                             val current = currentStroke.value
                             if (current.size > 1) {
-                                val paint = signaturePaint(
-                                    strokeWidthPx,
-                                    size.width,
-                                    size.height,
-                                    density
+                                drawSignatureStrokes(
+                                    nativeCanvas = nativeCanvas,
+                                    strokes = listOf(ColoredStroke(current)),
+                                    strokeWidthPx = strokeWidthPx,
+                                    canvasWidth = size.width,
+                                    canvasHeight = size.height,
+                                    density = density,
+                                    shadowAlpha = SignatureLiveShadowAlpha,
+                                    shadowBlur = SignatureLiveShadowBlur,
+                                    shadowOffsetY = SignatureLiveShadowOffsetY
                                 )
-                                val path = android.graphics.Path().apply {
-                                    addSmoothedStroke(current)
-                                }
-                                nativeCanvas.drawPath(path, paint)
                             }
                         }
                     }
@@ -879,110 +1929,18 @@ fun SigningScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(24.dp))
+                            .clip(alarmCardShape)
                             .border(
                                 width = (1.2f + 1.4f * cardTouchGlowProgress).dp,
                                 color = CardTouchGlow.copy(alpha = 0.18f + 0.42f * cardTouchGlowProgress),
-                                shape = RoundedCornerShape(24.dp)
+                                shape = alarmCardShape
                             )
                     )
                 }
 
-                // Tilde watermark — bottom-end of card
-                Text(
-                    text = "~${task.title}",
-                    fontFamily = DentonFontFamily,
-                    fontWeight = FontWeight.Light,
-                    fontSize = 14.sp,
-                    color = Color(0xFF2C2C2C),
-                    maxLines = 1,
-                    overflow = TextOverflow.Clip,
-                    style = LocalTextStyle.current.copy(
-                        shadow = Shadow(
-                            color = Color(0, 0, 0, (0.43f * 255).toInt()),
-                            offset = Offset(0f, 1.2f * localDensity.density),
-                            blurRadius = 1.3f * localDensity.density
-                        )
-                    ),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(end = 20.dp, bottom = 16.dp)
-                )
-
-                // Glare / shine overlay — moves opposite to tilt
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(24.dp))
-                        .drawBehind {
-                            // Spotlight position shifts opposite to tilt
-                            val spotX = size.width * (0.5f - cardTiltY / 20f)
-                            val spotY = size.height * (0.3f - cardTiltX / 40f)
-
-                            drawRect(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(
-                                        Color.White.copy(alpha = 0.25f),
-                                        Color.White.copy(alpha = 0.08f),
-                                        Color.Transparent
-                                    ),
-                                    center = Offset(spotX, spotY),
-                                    radius = size.width * 0.7f
-                                ),
-                                size = size
-                            )
-                        }
-                )
             }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
 
-        // Bottom CTA Button
-        Button(
-            onClick = {
-                if (!isCardFlipped) {
-                    if (isThresholdMet) {
-                        onProceed()
-                    } else {
-                        isCardFlipped = true
-                    }
-                } else if (isSignatureComplete) {
-                    isCardFlipped = false
-                } else if (isThresholdMet) {
-                    onProceed()
-                }
-            },
-            enabled = isActionEnabled,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp)
-                .height(56.dp),
-            shape = RoundedCornerShape(28.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = buttonBgColor,
-                contentColor = buttonTextColor,
-                disabledContainerColor = buttonBgColor,
-                disabledContentColor = buttonTextColor
-            ),
-            elevation = ButtonDefaults.buttonElevation(
-                defaultElevation = 0.dp,
-                pressedElevation = 0.dp,
-                disabledElevation = 0.dp
-            )
-        ) {
-            Text(
-                text = when {
-                    !isCardFlipped && isThresholdMet -> "I own this"
-                    !isCardFlipped -> "Flip card"
-                    isSignatureComplete -> "Flip to front"
-                    else -> "Sign to proceed"
-                },
-                fontFamily = SatoshiFontFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
-                letterSpacing = 1.sp
-            )
-        }
     }
 }

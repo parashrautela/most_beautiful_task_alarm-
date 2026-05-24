@@ -818,9 +818,10 @@ private fun LaurelWreath(isLeft: Boolean) {
 // ─── Slide-to-Set Button ────────────────────────────────────────────────────
 
 @Composable
-private fun SlideToSetButton(
+fun SlideToSetButton(
     onSlideComplete: () -> Unit,
     modifier: Modifier = Modifier,
+    successText: String = "\u201c Lets make it count \u201d",
 ) {
     val view = LocalView.current
     val context = view.context
@@ -1007,7 +1008,7 @@ private fun SlideToSetButton(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "\u201c Lets make it count \u201d",
+                    text = successText,
                     fontFamily = SatoshiFontFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = CtaTextSize,

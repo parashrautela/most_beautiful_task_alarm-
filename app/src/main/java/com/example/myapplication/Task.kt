@@ -7,5 +7,6 @@ data class Task(
     val title: String,
     val description: String,
     val dateTime: LocalDateTime,
-    val priority: Int // 0=Important, 1=Critical, 2=Flexible
+    val priority: Int, // 0=Important, 1=Critical, 2=Flexible
+    val reschedulesRemaining: Int? = 2
 )

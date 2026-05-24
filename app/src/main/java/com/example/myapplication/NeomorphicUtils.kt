@@ -5,16 +5,16 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import android.graphics.BlurMaskFilter
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 
 /**
- * A premium neomorphic inner shadow effect for rounded shapes.
- * Used across TaskAlarm to create "carved" or "pressed" UI elements.
+ * A highly reliable and premium neomorphic inner shadow effect for rounded shapes.
+ * Uses a hardware-acceleration-safe stroke-clipping technique to create gorgeous
+ * "carved" or "pressed" 3D inset lighting without offscreen buffer/DST_OUT glitches.
  */
 fun Modifier.neomorphicInnerShadow(
     shape: Shape,
@@ -23,33 +23,37 @@ fun Modifier.neomorphicInnerShadow(
     offsetY: Dp = 2.dp,
     offsetX: Dp = 2.dp,
     spread: Dp = 0.dp
-) = drawWithContent {
+) = this.drawWithContent {
     drawContent()
-
-    val rect = Rect(Offset.Zero, size)
-    val paint = Paint().apply {
-        this.color = color
-        this.isAntiAlias = true
-    }
-
-    val shadowLeft = rect.left + offsetX.toPx()
-    val shadowTop = rect.top + offsetY.toPx()
-    val shadowRight = rect.right + offsetX.toPx()
-    val shadowBottom = rect.bottom + offsetY.toPx()
-
-    drawIntoCanvas { canvas ->
-        canvas.saveLayer(rect, paint)
-        canvas.drawOutline(shape.createOutline(size, layoutDirection, this), paint)
-
-        val frameworkPaint = paint.asFrameworkPaint()
-        frameworkPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
-
-        if (blur.toPx() > 0) {
-            frameworkPaint.maskFilter = BlurMaskFilter(blur.toPx(), BlurMaskFilter.Blur.NORMAL)
+    
+    val outline = shape.createOutline(size, layoutDirection, this)
+    val path = Path().apply {
+        when (outline) {
+            is Outline.Rectangle -> addRect(outline.rect)
+            is Outline.Rounded -> addRoundRect(outline.roundRect)
+            is Outline.Generic -> addPath(outline.path)
         }
-
-        canvas.translate(offsetX.toPx(), offsetY.toPx())
-        canvas.drawOutline(shape.createOutline(size, layoutDirection, this), paint)
-        canvas.restore()
+    }
+    
+    clipPath(path) {
+        val paint = Paint()
+        paint.color = color
+        val frameworkPaint = paint.asFrameworkPaint()
+        if (blur.toPx() > 0f) {
+            frameworkPaint.maskFilter = BlurMaskFilter(
+                blur.toPx(), 
+                BlurMaskFilter.Blur.NORMAL
+            )
+        }
+        frameworkPaint.style = android.graphics.Paint.Style.STROKE
+        val strokeWidth = if (spread.toPx() > 0) spread.toPx() * 2f + blur.toPx() else blur.toPx() * 2f
+        frameworkPaint.strokeWidth = strokeWidth.coerceAtLeast(1f)
+        
+        drawIntoCanvas { canvas ->
+            canvas.save()
+            canvas.translate(offsetX.toPx(), offsetY.toPx())
+            canvas.drawPath(path, paint)
+            canvas.restore()
+        }
     }
 }
