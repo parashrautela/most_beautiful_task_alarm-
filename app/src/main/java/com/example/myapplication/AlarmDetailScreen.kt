@@ -1,5 +1,6 @@
 package com.example.myapplication
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -33,8 +34,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalDensity
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -68,6 +71,66 @@ private val SliderBg        = Color(0xFFD0D0D0)
 private val SliderText      = Color(0xFF3A3A3A)
 
 @Composable
+private fun DetailShadowText(
+    text: String,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    color: Color,
+    modifier: Modifier = Modifier,
+    lineHeight: androidx.compose.ui.unit.TextUnit = fontSize,
+    letterSpacing: androidx.compose.ui.unit.TextUnit = 0.sp,
+    textAlign: TextAlign? = null
+) {
+    Box(modifier = modifier) {
+        Text(
+            text = text,
+            fontFamily = DetailDentonMedium,
+            fontWeight = FontWeight.Medium,
+            fontSize = fontSize,
+            lineHeight = lineHeight,
+            color = Color.White.copy(alpha = 0.46f),
+            letterSpacing = letterSpacing,
+            textAlign = textAlign,
+            modifier = Modifier.offset(x = 0.7.dp, y = 0.9.dp)
+        )
+        Text(
+            text = text,
+            fontFamily = DetailDentonMedium,
+            fontWeight = FontWeight.Medium,
+            fontSize = fontSize,
+            lineHeight = lineHeight,
+            color = Color.Black.copy(alpha = 0.16f),
+            letterSpacing = letterSpacing,
+            textAlign = textAlign,
+            style = TextStyle(
+                shadow = Shadow(
+                    color = Color.Black.copy(alpha = 0.18f),
+                    offset = Offset(-0.4f, -0.4f),
+                    blurRadius = 0.8f
+                )
+            ),
+            modifier = Modifier.offset(x = (-0.5).dp, y = (-0.5).dp)
+        )
+        Text(
+            text = text,
+            fontFamily = DetailDentonMedium,
+            fontWeight = FontWeight.Medium,
+            fontSize = fontSize,
+            lineHeight = lineHeight,
+            color = color,
+            letterSpacing = letterSpacing,
+            textAlign = textAlign,
+            style = TextStyle(
+                shadow = Shadow(
+                    color = Color.Black.copy(alpha = 0.34f),
+                    offset = Offset(0f, 2f),
+                    blurRadius = 2.3f
+                )
+            )
+        )
+    }
+}
+
+@Composable
 fun AlarmDetailScreen(
     task: TaskAlarm,
     onBack: () -> Unit,
@@ -80,6 +143,14 @@ fun AlarmDetailScreen(
     var showTimePicker by remember { mutableStateOf(false) }
     var selectedRescheduleDate by remember { mutableStateOf<java.time.LocalDate?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    BackHandler(enabled = true) {
+        when {
+            showTimePicker -> showTimePicker = false
+            showDatePicker -> showDatePicker = false
+            else -> onBack()
+        }
+    }
 
     val ldt = remember(currentTask.dateTime) {
         try { LocalDateTime.parse(currentTask.dateTime) } catch (e: Exception) { LocalDateTime.now() }
@@ -206,7 +277,7 @@ fun AlarmDetailScreen(
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.Bottom
                 ) {
 
                     // IMPORTANT badge (Figma 322:331 — 91×20)
@@ -261,41 +332,50 @@ fun AlarmDetailScreen(
                             fontWeight = FontWeight.Medium,
                             fontSize = 12.sp,
                             color = ImportantGray,
-                            letterSpacing = (-0.36).sp
+                            letterSpacing = (-0.36).sp,
+                            style = TextStyle(
+                                platformStyle = PlatformTextStyle(
+                                    includeFontPadding = false
+                                )
+                            )
                         )
                     }
 
-                    // Reschedule row
+                    // Reschedule button
                     val remaining = currentTask.reschedulesRemaining ?: 2
                     val canReschedule = remaining > 0
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            enabled = canReschedule
+                    if (canReschedule) {
+                        FigmaRescheduleButton(
+                            onClick = { showDatePicker = true }
+                        )
+                    } else {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.Bottom,
+                            modifier = Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                enabled = false
+                            ) {}
                         ) {
-                            showDatePicker = true
-                        }
-                    ) {
-                        Image(
-                            painter = painterResource(if (canReschedule) R.drawable.reschedule_active else R.drawable.reschedule_inactive),
-                            contentDescription = null,
-                            modifier = Modifier.size(13.dp),
-                            contentScale = ContentScale.Fit
-                        )
-                        Text(
-                            text = "Reschedule",
-                            fontFamily = DetailSatoshiMedium,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 12.sp,
-                            color = if (canReschedule) Color.Black else Color(0xFF7F7F7F),
-                            letterSpacing = (-0.36).sp,
-                            style = TextStyle(
-                                textDecoration = if (canReschedule) TextDecoration.Underline else TextDecoration.LineThrough
+                            Image(
+                                painter = painterResource(R.drawable.reschedule_inactive),
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                contentScale = ContentScale.Fit
                             )
-                        )
+                            Text(
+                                text = "Reschedule",
+                                fontFamily = DetailSatoshiMedium,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 12.sp,
+                                color = Color(0xFF7F7F7F),
+                                letterSpacing = (-0.36).sp,
+                                style = TextStyle(
+                                    textDecoration = TextDecoration.LineThrough
+                                )
+                            )
+                        }
                     }
                 }
 
@@ -308,30 +388,71 @@ fun AlarmDetailScreen(
                         verticalAlignment = Alignment.Bottom,
                         horizontalArrangement = Arrangement.spacedBy(30.dp)
                     ) {
-                        // Title — Denton 48sp #2F2F2F
-                        // Figma text-shadow: 0px 1px 0.8px rgba(47,47,47,0.28)
-                        Text(
-                            text = currentTask.title,
-                            fontFamily = DetailDentonMedium,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 48.sp,
-                            lineHeight = 36.sp,
-                            style = TextStyle(
-                                color = TitleColor,
-                                shadow = Shadow(
-                                    color = Color(0x4A2F2F2F), // rgba(47,47,47,0.28) → alpha≈71
-                                    offset = Offset(0f, 1f),
-                                    blurRadius = 0.8f
+                        // Title — Denton 48sp #2F2F2F (with drop shadow & inner shadow layers)
+                        Box(
+                            modifier = Modifier.weight(1f, fill = true)
+                        ) {
+                            // Layer 1: Embossed Bottom Highlight (White / Light)
+                            Text(
+                                text = currentTask.title,
+                                fontFamily = DetailDentonMedium,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 48.sp,
+                                color = Color.White.copy(alpha = 0.6f),
+                                style = TextStyle(
+                                    platformStyle = PlatformTextStyle(
+                                        includeFontPadding = false
+                                    )
+                                ),
+                                modifier = Modifier.offset(x = 0.5.dp, y = 0.8.dp)
+                            )
+
+                            // Layer 2: Inner Shadow / Engraved Recess (Dark Gray)
+                            Text(
+                                text = currentTask.title,
+                                fontFamily = DetailDentonMedium,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 48.sp,
+                                color = Color(0x3B000000), // soft dark shadow
+                                style = TextStyle(
+                                    platformStyle = PlatformTextStyle(
+                                        includeFontPadding = false
+                                    ),
+                                    shadow = Shadow(
+                                        color = Color.Black.copy(alpha = 0.2f),
+                                        offset = Offset(-0.4f, -0.4f),
+                                        blurRadius = 0.8f
+                                    )
+                                ),
+                                modifier = Modifier.offset(x = (-0.5).dp, y = (-0.5).dp)
+                            )
+
+                            // Layer 3: Foreground (with Figma text-shadow)
+                            Text(
+                                text = currentTask.title,
+                                fontFamily = DetailDentonMedium,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 48.sp,
+                                style = TextStyle(
+                                    color = TitleColor,
+                                    platformStyle = PlatformTextStyle(
+                                        includeFontPadding = false
+                                    ),
+                                    shadow = Shadow(
+                                        color = Color(0x4A2F2F2F), // rgba(47,47,47,0.28)
+                                        offset = Offset(0f, 1f),
+                                        blurRadius = 0.8f
+                                    )
                                 )
-                            ),
-                            modifier = Modifier.weight(1f)
-                        )
-                        // Day starburst badge — icon_day.png (increased size)
+                            )
+                        }
+
+                        // Day starburst badge — icon_day.png (Figma width=42.36px, height=20.77px)
                         Image(
                             painter = painterResource(R.drawable.icon_day),
                             contentDescription = null,
                             modifier = Modifier
-                                .size(width = 64.dp, height = 32.dp)
+                                .size(width = 42.4.dp, height = 20.8.dp)
                                 .rotate(-1.06f),
                             contentScale = ContentScale.FillBounds
                         )
@@ -360,19 +481,15 @@ fun AlarmDetailScreen(
                     // Date (Figma Frame 169)
                     Row(verticalAlignment = Alignment.Bottom) {
                         // "20" – Denton 48sp #2F2F2F tracking=-1.44
-                        Text(
+                        DetailShadowText(
                             text = dayNum,
-                            fontFamily = DetailDentonMedium,
-                            fontWeight = FontWeight.Medium,
                             fontSize = 48.sp,
                             color = DateColor,
                             letterSpacing = (-1.44).sp
                         )
                         // "/may/2026" – 14sp #3A3A3A tracking=-0.42
-                        Text(
+                        DetailShadowText(
                             text = monthYear,
-                            fontFamily = DetailDentonMedium,
-                            fontWeight = FontWeight.Medium,
                             fontSize = 14.sp,
                             color = DateSmallColor,
                             letterSpacing = (-0.42).sp,
@@ -386,19 +503,15 @@ fun AlarmDetailScreen(
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         // "12:10" – Denton 48sp #2F2F2F tracking=-1.44
-                        Text(
+                        DetailShadowText(
                             text = timeStr,
-                            fontFamily = DetailDentonMedium,
-                            fontWeight = FontWeight.Medium,
                             fontSize = 48.sp,
                             color = DateColor,
                             letterSpacing = (-1.44).sp
                         )
                         // "PM" – 14sp #3A3A3A center tracking=-0.42
-                        Text(
+                        DetailShadowText(
                             text = amPm.uppercase(Locale.US),
-                            fontFamily = DetailDentonMedium,
-                            fontWeight = FontWeight.Medium,
                             fontSize = 14.sp,
                             color = DateSmallColor,
                             letterSpacing = (-0.42).sp,
@@ -422,17 +535,18 @@ fun AlarmDetailScreen(
                     // S M T W T F S row — Denton 36sp
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         dayLetters.forEachIndexed { index, letter ->
                             val isActive = (index == activeDayIndex)
-                            Text(
+                            DetailShadowText(
                                 text = letter,
-                                fontFamily = DetailDentonMedium,
-                                fontWeight = FontWeight.Medium,
                                 fontSize = 36.sp,
                                 color = if (isActive) FreqActiveCol else FreqInactiveCol,
-                                letterSpacing = (-1.08).sp
+                                letterSpacing = (-1.08).sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.width(32.dp)
                             )
                         }
                     }
@@ -446,7 +560,9 @@ fun AlarmDetailScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(start = 22.dp, end = 22.dp, bottom = 22.dp),
-            successText = "“Only winners makes it this Far”"
+            idleText = "TASK COMPLETED",
+            successText = "“Only winners makes it this Far”",
+            useSoftDepth = true
         )
     }
 
@@ -484,4 +600,65 @@ fun AlarmDetailScreen(
             }
         )
     }
+}
+
+@Composable
+fun FigmaRescheduleButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val text = "Reschedule"
+    val fontSize = 12.sp
+    val letterSpacing = (-0.36).sp
+
+    Text(
+        text = text,
+        fontFamily = DetailSatoshiMedium,
+        fontWeight = FontWeight.Medium,
+        fontSize = fontSize,
+        color = Color.Black,
+        letterSpacing = letterSpacing,
+        style = TextStyle(
+            platformStyle = PlatformTextStyle(
+                includeFontPadding = false
+            )
+        ),
+        modifier = modifier
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .drawBehind {
+                val waveLength = 4.5.dp.toPx()
+                val amplitude = 0.7.dp.toPx() // extremely clean and tight amplitude
+                val centerY = size.height + 0.8.dp.toPx() // perfectly aligned right below text baseline
+                val strokeWidth = 1.0.dp.toPx()
+
+                val path = Path()
+                path.moveTo(0f, centerY)
+                var x = 0f
+                while (x < size.width) {
+                    val nextX1 = x + waveLength / 4
+                    val nextY1 = centerY + amplitude
+                    val nextX2 = x + waveLength / 2
+                    val nextY2 = centerY
+                    path.quadraticTo(nextX1, nextY1, nextX2, nextY2)
+
+                    val nextX3 = x + waveLength * 3 / 4
+                    val nextY3 = centerY - amplitude
+                    val nextX4 = x + waveLength
+                    val nextY4 = centerY
+                    path.quadraticTo(nextX3, nextY3, nextX4, nextY4)
+
+                    x += waveLength
+                }
+
+                drawPath(
+                    path = path,
+                    color = Color.Black,
+                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                )
+            }
+    )
 }

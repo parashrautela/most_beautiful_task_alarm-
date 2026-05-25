@@ -821,7 +821,9 @@ private fun LaurelWreath(isLeft: Boolean) {
 fun SlideToSetButton(
     onSlideComplete: () -> Unit,
     modifier: Modifier = Modifier,
+    idleText: String = "SLIDE TO SET",
     successText: String = "\u201c Lets make it count \u201d",
+    useSoftDepth: Boolean = false,
 ) {
     val view = LocalView.current
     val context = view.context
@@ -908,18 +910,45 @@ fun SlideToSetButton(
     val defaultBg = Brush.verticalGradient(listOf(CtaBgColor, CtaBgColor))
     val successBg = Color.Black // Pure black for "fully black" finish
 
+    val ctaShape = RoundedCornerShape(CtaCornerRadius)
+    val depthModifier = if (useSoftDepth) {
+        Modifier
+            .shadow(
+                elevation = 15.dp,
+                shape = ctaShape,
+                ambientColor = Color(0xFF717171).copy(alpha = 0.36f),
+                spotColor = Color(0xFF717171).copy(alpha = 0.36f)
+            )
+    } else {
+        Modifier
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(CtaHeight)
             .onGloballyPositioned { pillWidthPx = it.size.width.toFloat() }
-            .clip(RoundedCornerShape(CtaCornerRadius))
-            .background(CtaBgColor),
+            .then(depthModifier)
+            .clip(ctaShape)
+            .background(CtaBgColor)
+            .then(
+                if (useSoftDepth) {
+                    Modifier.innerShadow(
+                        shape = ctaShape,
+                        color = Color.White.copy(alpha = 0.16f),
+                        blur = 4.dp,
+                        offsetX = (-2).dp,
+                        offsetY = (-2).dp
+                    )
+                } else {
+                    Modifier
+                }
+            ),
         contentAlignment = Alignment.CenterStart
     ) {
         // 1. Default "SLIDE TO SET" Text (Centered in full pill)
         Text(
-            text = "SLIDE TO SET",
+            text = idleText,
             modifier = Modifier.align(Alignment.Center),
             fontFamily = SatoshiFontFamily,
             fontWeight = FontWeight.Bold,
