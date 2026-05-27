@@ -1441,7 +1441,7 @@ fun SigningScreen(
                 .fillMaxWidth(1.9f)
                 .height(680.dp)
                 .graphicsLayer {
-                    alpha = glareAlpha * 0.82f
+                    alpha = glareAlpha * 0.95f
                     translationX = backgroundGlareOffsetX.dp.toPx()
                     translationY = backgroundGlareOffsetY.dp.toPx()
                 }
@@ -1674,14 +1674,19 @@ fun SigningScreen(
                         val radiusPx = 30.dp.toPx()
                         val insetX = 18.dp.toPx()
                         val insetY = 16.dp.toPx()
+                        
+                        // Dynamic shadow offset shift based on card tilt
+                        val shadowShiftX = (rotationYState.floatValue * 0.8f).dp.toPx()
+                        val shadowShiftY = 2.dp.toPx() + (rotationXState.floatValue * 0.6f).dp.toPx()
+                        
                         val paint = android.graphics.Paint().apply {
                             isAntiAlias = true
                             color = android.graphics.Color.argb(1, 113, 113, 113)
                             setShadowLayer(
                                 blurPx,
-                                0f,
-                                2.dp.toPx(),
-                                android.graphics.Color.argb((0.5f * 255).toInt(), 113, 113, 113)
+                                shadowShiftX,
+                                shadowShiftY,
+                                android.graphics.Color.argb((0.15f * 255).toInt(), 113, 113, 113)
                             )
                         }
                         canvas.nativeCanvas.drawRoundRect(
@@ -1856,6 +1861,22 @@ fun SigningScreen(
                                 )
                             }
                     ) {
+                        Canvas(modifier = Modifier.matchParentSize()) {
+                            drawRect(
+                                brush = Brush.linearGradient(
+                                    colorStops = arrayOf(
+                                        0.00f to Color(0xFFE2FFFB).copy(alpha = 0.58f),
+                                        0.34f to Color(0xFFF2FFE1).copy(alpha = 0.34f),
+                                        0.58f to Color(0xFFFFEFE1).copy(alpha = 0.30f),
+                                        0.76f to Color(0xFFFFE4FA).copy(alpha = 0.42f),
+                                        1.00f to Color(0xFFE7E5FF).copy(alpha = 0.54f)
+                                    ),
+                                    start = Offset(0f, size.height),
+                                    end = Offset(size.width, 0f)
+                                )
+                            )
+                        }
+
                         // Card Front Content
                         Column(
                             modifier = Modifier
@@ -2058,11 +2079,11 @@ fun SigningScreen(
                         )
 
                         Box(
-			                            modifier = Modifier
-			                                .matchParentSize()
-			                                .graphicsLayer {
-			                                    alpha = glareAlpha * 0.48f
-			                                }
+                            modifier = Modifier
+                                .matchParentSize()
+                                .graphicsLayer {
+                                    alpha = glareAlpha * 0.85f
+                                }
                                 .clip(alarmCardShape)
                         ) {
                             Image(
@@ -2070,11 +2091,11 @@ fun SigningScreen(
                                 contentDescription = null,
                                 modifier = Modifier
                                     .align(Alignment.Center)
-                                    .fillMaxWidth(1.58f)
-                                    .fillMaxHeight(1.28f)
+                                    .fillMaxWidth(2.35f)
+                                    .fillMaxHeight(1.36f)
                                     .graphicsLayer {
-                                        translationX = glareOffsetX.dp.toPx()
-                                        translationY = glareOffsetY.dp.toPx()
+                                        translationX = (glareOffsetX * 0.62f).dp.toPx() + 10.dp.toPx()
+                                        translationY = (glareOffsetY * 0.62f).dp.toPx() - 18.dp.toPx()
                                     },
                                 contentScale = ContentScale.FillBounds
                             )
@@ -2083,20 +2104,43 @@ fun SigningScreen(
                 } else {
                     Box(modifier = Modifier.fillMaxSize()) {
                         // Aurora background gradient from resource
-                        Image(
-                            painter = painterResource(id = R.drawable.glare_for_card),
-                            contentDescription = null,
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth(1.3f)
-                                .height(253.dp)
-                                .align(Alignment.TopCenter)
+                                .matchParentSize()
                                 .graphicsLayer {
-                                    translationX = glareOffsetX.dp.toPx()
-                                    translationY = glareOffsetY.dp.toPx()
-                                    alpha = (1f - glareAlpha) * 0.48f
-                                },
-                            contentScale = ContentScale.FillBounds
-                        )
+                                    alpha = (1f - glareAlpha) * 0.85f
+                                }
+                                .clip(alarmCardShape)
+                        ) {
+                            Canvas(modifier = Modifier.matchParentSize()) {
+                                drawRect(
+                                    brush = Brush.linearGradient(
+                                        colorStops = arrayOf(
+                                            0.00f to Color(0xFFE2FFFB).copy(alpha = 0.58f),
+                                            0.34f to Color(0xFFF2FFE1).copy(alpha = 0.34f),
+                                            0.58f to Color(0xFFFFEFE1).copy(alpha = 0.30f),
+                                            0.76f to Color(0xFFFFE4FA).copy(alpha = 0.42f),
+                                            1.00f to Color(0xFFE7E5FF).copy(alpha = 0.54f)
+                                        ),
+                                        start = Offset(0f, size.height),
+                                        end = Offset(size.width, 0f)
+                                    )
+                                )
+                            }
+                            Image(
+                                painter = painterResource(id = R.drawable.glare_for_card),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .fillMaxWidth(2.35f)
+                                    .fillMaxHeight(1.36f)
+                                    .graphicsLayer {
+                                        translationX = (glareOffsetX * 0.62f).dp.toPx() + 10.dp.toPx()
+                                        translationY = (glareOffsetY * 0.62f).dp.toPx() - 18.dp.toPx()
+                                    },
+                                contentScale = ContentScale.FillBounds
+                            )
+                        }
 
                         // Center placeholder text (fades out as user signs)
                         val placeholderAlpha by animateFloatAsState(
