@@ -69,38 +69,12 @@ fun DatePickerSheet(
     initialDate: LocalDate = LocalDate.now(),
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    // Waveform scroll logic with momentum
-    val totalOffset = remember { Animatable(0f) }
-    val scope = rememberCoroutineScope()
-    val velocityTracker = remember { VelocityTracker() }
-    
-    // Unified step based on barWidth (2dp) + barSpacing (12dp)
-    val dayStepPx = with(LocalDensity.current) { 14.dp.toPx() }
     
     // For visual display in the sheet
     var currentDisplayDate by remember { mutableStateOf(initialDate) }
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    var lastSnappedIndex by remember { mutableStateOf(0) }
 
     // Capture the initial date once to avoid feedback loops
     val baseDate = remember { initialDate }
-    
-    // Sync display date and haptics with scroll offset
-    LaunchedEffect(Unit) {
-        snapshotFlow { totalOffset.value }
-            .collect { offset ->
-                val currentIndex = (offset / dayStepPx).roundToInt()
-                if (currentIndex != lastSnappedIndex) {
-                    lastSnappedIndex = currentIndex
-                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                    
-                    val newDate = baseDate.plusDays((-currentIndex).toLong())
-                    if (newDate != currentDisplayDate) {
-                        currentDisplayDate = newDate
-                    }
-                }
-            }
-    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -225,102 +199,21 @@ fun DatePickerSheet(
                 modifier = Modifier
                     .padding(top = 12.dp)
                     .fillMaxWidth()
-                    .height(160.dp)
-                    .pointerInput(Unit) {
-                        detectHorizontalDragGestures(
-                            onDragStart = { velocityTracker.resetTracking() },
-                            onHorizontalDrag = { change, amount ->
-                                velocityTracker.addPosition(change.uptimeMillis, change.position)
-                                scope.launch {
-                                    totalOffset.snapTo(totalOffset.value + amount)
-                                }
-                                change.consume()
-                            },
-                            onDragEnd = {
-                                val velocity = velocityTracker.calculateVelocity().x
-                                scope.launch {
-                                    if (abs(velocity) > 100f) {
-                                        // Fling with decay
-                                        totalOffset.animateDecay(velocity, exponentialDecay())
-                                    }
-                                    // Always snap to the nearest pillar after movement
-                                    val finalSnappedOffset = (totalOffset.value / dayStepPx).roundToInt() * dayStepPx
-                                    totalOffset.animateTo(
-                                        targetValue = finalSnappedOffset,
-                                        animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioLowBouncy)
-                                    )
-                                }
-                            }
-                        )
-                    },
+                    .height(160.dp),
                 contentAlignment = Alignment.Center
             ) {
-                // ── Tension Lines & Needles ──
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val centerX = size.width / 2
-                    val centerY = size.height / 2 + 10.dp.toPx()
-                    val barWidth = 2.dp.toPx()
-                    val barSpacing = 12.dp.toPx() // Tighter spacing for "drum" density
-                    val step = barWidth + barSpacing
-                    val centerBarHeight = 120.dp.toPx()
-                    val edgeBarHeight = 4.dp.toPx() // Even shorter edges
-
-                    // 1. Draw Corner Vectors (Using exported PNGs)
-                    // (Corner images are now placed as Composables in the Box below for better alignment)
-
-                    // 2. Draw Needles
-                    val currentOffset = totalOffset.value
-                    val startI = ((-centerX - currentOffset) / step).toInt() - 4
-                    val endI = ((size.width - centerX - currentOffset) / step).toInt() + 4
-                    
-                    for (i in startI..endI) {
-                        val x = centerX + (i * step) + currentOffset
-                        val distanceFromCenter = abs(x - centerX)
-                        val maxDistance = (centerX * 0.9f) // Reveal more across the drum width
-                        
-                        val normalizedDistance = (distanceFromCenter / maxDistance).coerceIn(0f, 1f)
-                        // Slightly wider falloff for the "drum" reveal
-                        val heightFactor = (1f - normalizedDistance).pow(2.2f) 
-                        val barHeight = edgeBarHeight + (centerBarHeight - edgeBarHeight) * heightFactor
-
-                        if (x > -20f && x < size.width + 20f) {
-                            // 2a. Dynamic Needle Shadow (Stronger at center)
-                            drawIntoCanvas { canvas ->
-                                val shadowPaint = android.graphics.Paint().apply {
-                                    isAntiAlias = true
-                                    color = android.graphics.Color.BLACK
-                                    alpha = (0.22f * heightFactor * 255).toInt()
-                                    maskFilter = BlurMaskFilter(if (distanceFromCenter < 2.dp.toPx()) 6.dp.toPx() else 4.dp.toPx(), BlurMaskFilter.Blur.NORMAL)
-                                }
-                                canvas.nativeCanvas.drawRoundRect(
-                                    x - barWidth / 2,
-                                    centerY - barHeight / 2 + 2.dp.toPx(),
-                                    x + barWidth / 2,
-                                    centerY + barHeight / 2 + 8.dp.toPx(),
-                                    barWidth / 2, barWidth / 2,
-                                    shadowPaint
-                                )
-                            }
-
-                            // 2b. Dynamic Needle Gradient (Black center, Gray edges)
-                            val topColor = if (distanceFromCenter < step) Color.Black else Color(0xFF212121).copy(alpha = heightFactor)
-                            
-                            drawRoundRect(
-                                brush = Brush.verticalGradient(
-                                    colors = listOf(
-                                        topColor,
-                                        Color(0xFFF3F4F6).copy(alpha = 0.05f * heightFactor)
-                                    ),
-                                    startY = centerY - barHeight / 2,
-                                    endY = centerY + barHeight / 2
-                                ),
-                                topLeft = Offset(x - barWidth / 2, centerY - barHeight / 2),
-                                size = Size(barWidth, barHeight),
-                                cornerRadius = CornerRadius(barWidth / 2, barWidth / 2)
-                            )
+                val initialIndex = java.time.temporal.ChronoUnit.DAYS.between(baseDate, currentDisplayDate).toInt().coerceIn(0, 30)
+                WaveformPicker(
+                    initialIndex = initialIndex,
+                    maxValue = 30,
+                    onIndexChanged = { index ->
+                        val newDate = baseDate.plusDays(index.toLong())
+                        if (newDate != currentDisplayDate) {
+                            currentDisplayDate = newDate
                         }
-                    }
-                }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
 
                 // ── Framing Vectors (Corner & Side Ornaments from Figma) ──
                 // ── Framing Vectors (Corner Ornaments precisely aligned to drum) ──

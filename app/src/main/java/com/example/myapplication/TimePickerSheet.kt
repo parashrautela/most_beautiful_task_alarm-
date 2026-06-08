@@ -7,6 +7,8 @@ import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.animation.core.spring
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.platform.LocalView
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -72,39 +74,13 @@ fun TimePickerSheet(
     initialTime: LocalTime = LocalTime.now(),
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    // Waveform scroll logic with momentum
-    val totalOffset = remember { Animatable(0f) }
-    val scope = rememberCoroutineScope()
-    val velocityTracker = remember { VelocityTracker() }
-    
-    // Unified step based on barWidth (2dp) + barSpacing (12dp)
-    // Each step represents 1 minute
-    val timeStepPx = with(LocalDensity.current) { 14.dp.toPx() }
+    val view = LocalView.current
     
     // For visual display in the sheet
     var currentDisplayTime by remember { mutableStateOf(initialTime) }
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    var lastSnappedIndex by remember { mutableStateOf(0) }
 
     // Capture the initial time once to avoid feedback loops when parent state updates
     val baseTime = remember { initialTime }
-    
-    // Sync display time and haptics with scroll offset
-    LaunchedEffect(Unit) {
-        snapshotFlow { totalOffset.value }
-            .collect { offset ->
-                val currentIndex = (offset / timeStepPx).roundToInt()
-                if (currentIndex != lastSnappedIndex) {
-                    lastSnappedIndex = currentIndex
-                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                    
-                    val newTime = baseTime.plusMinutes((-currentIndex).toLong())
-                    if (newTime != currentDisplayTime) {
-                        currentDisplayTime = newTime
-                    }
-                }
-            }
-    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -197,15 +173,8 @@ fun TimePickerSheet(
                         interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                         indication = null
                     ) {
-                        scope.launch {
-                            // Toggle AM/PM by shifting the scroll drum by 12 hours (720 minutes)
-                            val shift = 720f * timeStepPx
-                            totalOffset.animateTo(
-                                targetValue = totalOffset.value - shift,
-                                animationSpec = spring(stiffness = Spring.StiffnessLow)
-                            )
-                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                        }
+                        currentDisplayTime = currentDisplayTime.plusHours(12)
+                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                     },
                     style = TextStyle(
                         fontFamily = DentonFontFamily,
@@ -250,95 +219,22 @@ fun TimePickerSheet(
                 modifier = Modifier
                     .padding(top = 12.dp)
                     .fillMaxWidth()
-                    .height(160.dp)
-                    .pointerInput(Unit) {
-                        detectHorizontalDragGestures(
-                            onDragStart = { velocityTracker.resetTracking() },
-                            onHorizontalDrag = { change, amount ->
-                                velocityTracker.addPosition(change.uptimeMillis, change.position)
-                                scope.launch {
-                                    totalOffset.snapTo(totalOffset.value + amount)
-                                }
-                                change.consume()
-                            },
-                            onDragEnd = {
-                                val velocity = velocityTracker.calculateVelocity().x
-                                scope.launch {
-                                    if (abs(velocity) > 100f) {
-                                        totalOffset.animateDecay(velocity, exponentialDecay())
-                                    }
-                                    val finalSnappedOffset = (totalOffset.value / timeStepPx).roundToInt() * timeStepPx
-                                    totalOffset.animateTo(
-                                        targetValue = finalSnappedOffset,
-                                        animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioLowBouncy)
-                                    )
-                                }
-                            }
-                        )
-                    },
+                    .height(160.dp),
                 contentAlignment = Alignment.Center
             ) {
-                // ── Waveform Canvas ──
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val centerX = size.width / 2
-                    val centerY = size.height / 2 + 10.dp.toPx()
-                    val barWidth = 2.dp.toPx()
-                    val barSpacing = 12.dp.toPx()
-                    val step = barWidth + barSpacing
-                    val centerBarHeight = 120.dp.toPx()
-                    val edgeBarHeight = 4.dp.toPx()
-
-                    val currentOffset = totalOffset.value
-                    val startI = ((-centerX - currentOffset) / step).toInt() - 4
-                    val endI = ((size.width - centerX - currentOffset) / step).toInt() + 4
-                    
-                    for (i in startI..endI) {
-                        val x = centerX + (i * step) + currentOffset
-                        val distanceFromCenter = abs(x - centerX)
-                        val maxDistance = (centerX * 0.9f)
-                        
-                        val normalizedDistance = (distanceFromCenter / maxDistance).coerceIn(0f, 1f)
-                        val heightFactor = (1f - normalizedDistance).pow(2.2f) 
-                        val barHeight = edgeBarHeight + (centerBarHeight - edgeBarHeight) * heightFactor
-
-                        if (x > -20f && x < size.width + 20f) {
-                            // Shadow
-                            drawIntoCanvas { canvas ->
-                                val shadowPaint = android.graphics.Paint().apply {
-                                    isAntiAlias = true
-                                    color = android.graphics.Color.BLACK
-                                    alpha = (0.22f * heightFactor * 255).toInt()
-                                    maskFilter = BlurMaskFilter(if (distanceFromCenter < 2.dp.toPx()) 6.dp.toPx() else 4.dp.toPx(), BlurMaskFilter.Blur.NORMAL)
-                                }
-                                canvas.nativeCanvas.drawRoundRect(
-                                    x - barWidth / 2,
-                                    centerY - barHeight / 2 + 2.dp.toPx(),
-                                    x + barWidth / 2,
-                                    centerY + barHeight / 2 + 8.dp.toPx(),
-                                    barWidth / 2, barWidth / 2,
-                                    shadowPaint
-                                )
-                            }
-
-                            // Gradient Needle
-                            val topColor = if (distanceFromCenter < step) Color.Black else Color(0xFF212121).copy(alpha = heightFactor)
-                            
-                            drawRoundRect(
-                                brush = Brush.verticalGradient(
-                                    colors = listOf(
-                                        topColor,
-                                        Color(0xFFF3F4F6).copy(alpha = 0.05f * heightFactor)
-                                    ),
-                                    startY = centerY - barHeight / 2,
-                                    endY = centerY + barHeight / 2
-                                ),
-                                topLeft = Offset(x - barWidth / 2, centerY - barHeight / 2),
-                                size = Size(barWidth, barHeight),
-                                cornerRadius = CornerRadius(barWidth / 2, barWidth / 2)
-                            )
+                val diff = java.time.temporal.ChronoUnit.MINUTES.between(baseTime, currentDisplayTime).toInt()
+                val initialIndex = if (diff < 0) diff + 1440 else diff
+                WaveformPicker(
+                    initialIndex = initialIndex,
+                    maxValue = 1440,
+                    onIndexChanged = { index ->
+                        val newTime = baseTime.plusMinutes(index.toLong())
+                        if (newTime != currentDisplayTime) {
+                            currentDisplayTime = newTime
                         }
-                    }
-                }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
 
                 // ── Framing Vectors ──
                 Image(
