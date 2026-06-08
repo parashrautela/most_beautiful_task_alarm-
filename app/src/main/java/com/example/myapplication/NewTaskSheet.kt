@@ -239,9 +239,7 @@ fun NewTaskSheet(onDismiss: () -> Unit) {
         tonalElevation = 0.dp,
     ) {
         NewTaskSheetContent(
-            selectedDay = selectedDay,
-            selectedMonth = selectedMonth,
-            selectedYear = selectedYear,
+            selectedDate = selectedFullDate,
             selectedTime = selectedFullTime,
             onTimeSelected = { selectedFullTime = it },
             onShowDatePicker = { showDatePicker = true },
@@ -275,15 +273,16 @@ fun NewTaskSheet(onDismiss: () -> Unit) {
 
 @Composable
 private fun NewTaskSheetContent(
-    selectedDay: Int,
-    selectedMonth: String,
-    selectedYear: Int,
+    selectedDate: LocalDate,
     selectedTime: LocalTime,
     onTimeSelected: (LocalTime) -> Unit,
     onShowDatePicker: () -> Unit,
     onShowTimePicker: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val selectedDay = selectedDate.dayOfMonth
+    val selectedMonth = selectedDate.month.name.take(3).lowercase()
+    val selectedYear = selectedDate.year
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var selectedPriority by remember { mutableIntStateOf(0) }  // 0=Important, 1=Critical, 2=Flexible
@@ -722,10 +721,7 @@ private fun NewTaskSheetContent(
         val context = androidx.compose.ui.platform.LocalContext.current
         SlideToSetButton(
             onSlideComplete = {
-                val alarmDateTime = java.time.LocalDateTime.of(
-                    java.time.LocalDate.of(selectedYear, java.time.Month.valueOf(selectedMonth.uppercase()), selectedDay),
-                    selectedTime
-                )
+                val alarmDateTime = java.time.LocalDateTime.of(selectedDate, selectedTime)
                 val task = TaskAlarm(
                     title = if (title.isEmpty()) "Task Alarm" else title,
                     description = if (description.isEmpty()) "Time to get things done!" else description,
