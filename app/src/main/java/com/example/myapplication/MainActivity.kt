@@ -434,49 +434,28 @@ fun TaskAlarmHomeScreen() {
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Insights Bar Chart
-            Canvas(modifier = Modifier.size(24.dp).clickable { currentScreen = AppScreen.Patterns }) {
-                val barW = 2.dp.toPx()
-                val gap = 4.dp.toPx()
-                val startX = 4.dp.toPx()
-                // Bar 1
-                drawRect(Color.Black, topLeft = Offset(startX, 10.dp.toPx()), size = Size(barW, 10.dp.toPx()))
-                // Bar 2
-                drawRect(Color.Black, topLeft = Offset(startX + barW + gap, 4.dp.toPx()), size = Size(barW, 16.dp.toPx()))
-                // Bar 3
-                drawRect(Color.Black, topLeft = Offset(startX + (barW + gap) * 2, 8.dp.toPx()), size = Size(barW, 12.dp.toPx()))
-                // Bottom line
-                drawLine(Color.Black, Offset(2.dp.toPx(), 20.dp.toPx()), Offset(22.dp.toPx(), 20.dp.toPx()), strokeWidth = 1.dp.toPx())
-            }
-            // Notifications Bell
-            Canvas(modifier = Modifier.size(24.dp)) {
-                val strokeW = 1.5.dp.toPx()
-                // Bell dome
-                drawArc(
-                    color = Color.Black,
-                    startAngle = 180f,
-                    sweepAngle = 180f,
-                    useCenter = false,
-                    topLeft = Offset(4.dp.toPx(), 4.dp.toPx()),
-                    size = Size(16.dp.toPx(), 16.dp.toPx()),
-                    style = Stroke(width = strokeW)
-                )
-                // Bell sides
-                drawLine(Color.Black, Offset(4.dp.toPx(), 12.dp.toPx()), Offset(2.dp.toPx(), 18.dp.toPx()), strokeWidth = strokeW)
-                drawLine(Color.Black, Offset(20.dp.toPx(), 12.dp.toPx()), Offset(22.dp.toPx(), 18.dp.toPx()), strokeWidth = strokeW)
-                // Bell bottom
-                drawLine(Color.Black, Offset(1.dp.toPx(), 18.dp.toPx()), Offset(23.dp.toPx(), 18.dp.toPx()), strokeWidth = strokeW, cap = StrokeCap.Round)
-                // Clapper
-                drawArc(
-                    color = Color.Black,
-                    startAngle = 0f,
-                    sweepAngle = 180f,
-                    useCenter = false,
-                    topLeft = Offset(10.dp.toPx(), 18.dp.toPx()),
-                    size = Size(4.dp.toPx(), 4.dp.toPx()),
-                    style = Stroke(width = strokeW)
-                )
-            }
+            // Stats Icon
+            Image(
+                painter = painterResource(id = R.drawable.stats_icon),
+                contentDescription = "Stats",
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null
+                    ) { currentScreen = AppScreen.Patterns }
+            )
+            // Notification Icon
+            Image(
+                painter = painterResource(id = R.drawable.notification_icon),
+                contentDescription = "Notifications",
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null
+                    ) { /* TODO: notification screen */ }
+            )
         }
 
         // FAB
@@ -575,7 +554,10 @@ fun TaskAlarmHomeScreen() {
                         )
                     }
                 }
-                .clickable { showSheet = true },
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null
+                ) { showSheet = true },
             contentAlignment = Alignment.Center
         ) {
             Canvas(modifier = Modifier.size(22.dp)) {
