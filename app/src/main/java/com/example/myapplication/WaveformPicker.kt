@@ -1,5 +1,6 @@
 package com.example.myapplication
 
+import android.graphics.BlurMaskFilter
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -23,6 +24,9 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
@@ -31,6 +35,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.exp
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
@@ -51,15 +56,14 @@ fun WaveformPicker(
     onIndexChanged: (Int) -> Unit,
     modifier: Modifier = Modifier,
     itemSpacingDp: Dp = 14.dp,
-    barWidthDp: Dp = 3.dp,
-    barGapDp: Dp = 6.dp,
-    centerBarMaxHeightDp: Dp = 72.dp,
+    barWidthDp: Dp = 2.dp,
+    barGapDp: Dp = 12.dp,
+    centerBarMaxHeightDp: Dp = 120.dp,
     minBarHeightDp: Dp = 4.dp
 ) {
     val density = LocalDensity.current
     val itemSpacing = with(density) { itemSpacingDp.toPx() }
     val barWidth = with(density) { barWidthDp.toPx() }
-    val barGap = with(density) { barGapDp.toPx() }
     val maxBarHeight = with(density) { centerBarMaxHeightDp.toPx() }
     val minBarHeight = with(density) { minBarHeightDp.toPx() }
 
@@ -206,7 +210,7 @@ fun WaveformPicker(
         // STAGE 3 — REBUILD THE CANVAS DRAWING ON THE RENDER THREAD
         Canvas(modifier = Modifier.fillMaxSize()) {
             val canvasWidth = size.width
-            val centerY = size.height / 2f
+            val centerY = size.height / 2f + 10.dp.toPx() // Restore original 10.dp shift
             
             // Total bars density
             val totalBars = 52
@@ -214,17 +218,6 @@ fun WaveformPicker(
             
             // Sub-item shifting offset for infinite rendering effect
             val offsetShift = scrollOffset.value % itemSpacing
-
-            // Draw a slightly wider, slightly taller bar in white with 20% opacity directly behind the center bar
-            val centerBarX = (canvasWidth / 2f) + offsetShift
-            val glowWidth = barWidth * 1.5f
-            val glowHeight = maxBarHeight * 1.1f
-            drawRoundRect(
-                color = Color.White.copy(alpha = 0.2f),
-                topLeft = Offset(centerBarX - glowWidth / 2f, centerY - glowHeight / 2f),
-                size = Size(glowWidth, glowHeight),
-                cornerRadius = CornerRadius(glowWidth / 2f, glowWidth / 2f)
-            )
 
             // Draw all bars
             for (barIndex in 0 until totalBars) {
@@ -234,20 +227,46 @@ fun WaveformPicker(
                 if (barX < -barWidth || barX > canvasWidth + barWidth) continue
                 
                 val distanceFromCenter = abs(barX - (canvasWidth / 2f))
-                val maxDistance = centerIndex * itemSpacing
+                val maxDistance = (canvasWidth / 2f) * 0.9f // Restore original maxDistance scaling
                 val normalizedDistance = (distanceFromCenter / maxDistance).coerceIn(0f, 1f)
                 
-                // Gaussian height falloff
-                val barHeight = minBarHeight + (maxBarHeight - minBarHeight) * 
-                    exp(-4f * normalizedDistance * normalizedDistance)
+                // Restore original height factor calculation
+                val heightFactor = (1f - normalizedDistance).pow(2.2f)
+                val barHeight = minBarHeight + (maxBarHeight - minBarHeight) * heightFactor
                 
-                // Gaussian alpha falloff
-                val isCenter = distanceFromCenter < itemSpacing / 2f
-                val alpha = if (isCenter) 1.0f else (0.25f + 0.75f * exp(-3f * normalizedDistance * normalizedDistance))
+                // Restore original shadow rendering
+                drawIntoCanvas { canvas ->
+                    val shadowPaint = android.graphics.Paint().apply {
+                        isAntiAlias = true
+                        color = android.graphics.Color.BLACK
+                        alpha = (0.22f * heightFactor * 255).toInt()
+                        maskFilter = BlurMaskFilter(
+                            if (distanceFromCenter < itemSpacing) 6.dp.toPx() else 4.dp.toPx(),
+                            BlurMaskFilter.Blur.NORMAL
+                        )
+                    }
+                    canvas.nativeCanvas.drawRoundRect(
+                        barX - barWidth / 2f,
+                        centerY - barHeight / 2f + 2.dp.toPx(),
+                        barX + barWidth / 2f,
+                        centerY + barHeight / 2f + 8.dp.toPx(),
+                        barWidth / 2f, barWidth / 2f,
+                        shadowPaint
+                    )
+                }
+
+                // Restore original vertical gradient needle color styling
+                val topColor = if (distanceFromCenter < itemSpacing) Color.Black else Color(0xFF212121).copy(alpha = heightFactor)
                 
-                // Draw the bar (black/charcoal for light theme visibility)
                 drawRoundRect(
-                    color = Color(0xFF212121).copy(alpha = alpha),
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            topColor,
+                            Color(0xFFF3F4F6).copy(alpha = 0.05f * heightFactor)
+                        ),
+                        startY = centerY - barHeight / 2f,
+                        endY = centerY + barHeight / 2f
+                    ),
                     topLeft = Offset(barX - barWidth / 2f, centerY - barHeight / 2f),
                     size = Size(barWidth, barHeight),
                     cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)

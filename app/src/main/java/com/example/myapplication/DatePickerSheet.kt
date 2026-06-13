@@ -202,10 +202,12 @@ fun DatePickerSheet(
                     .height(160.dp),
                 contentAlignment = Alignment.Center
             ) {
-                val initialIndex = java.time.temporal.ChronoUnit.DAYS.between(baseDate, currentDisplayDate).toInt().coerceIn(0, 30)
+                val endOfNextYear = java.time.LocalDate.of(baseDate.year + 1, 12, 31)
+                val maxDaysLimit = java.time.temporal.ChronoUnit.DAYS.between(baseDate, endOfNextYear).toInt().coerceAtLeast(365)
+                val initialIndex = java.time.temporal.ChronoUnit.DAYS.between(baseDate, currentDisplayDate).toInt().coerceIn(0, maxDaysLimit)
                 WaveformPicker(
                     initialIndex = initialIndex,
-                    maxValue = 30,
+                    maxValue = maxDaysLimit,
                     onIndexChanged = { index ->
                         val newDate = baseDate.plusDays(index.toLong())
                         if (newDate != currentDisplayDate) {

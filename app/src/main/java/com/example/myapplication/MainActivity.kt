@@ -40,12 +40,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
@@ -81,8 +84,16 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
-enum class AppScreen { Home, Patterns }
+enum class AppScreen { Home, Patterns, Streak }
 
 // ─── Custom Fonts ───────────────────────────────────────────────────────────
 private val DentonFontFamily = FontFamily(
@@ -149,6 +160,35 @@ private fun Modifier.safeBlur(
     this.blur(radius, edgeTreatment)
 } else {
     this // graceful no-op on older devices
+}
+
+private fun Modifier.scrollFadeBlur(
+    screenY: androidx.compose.ui.unit.Dp
+): Modifier {
+    val startFadeY = 359f
+    val endFadeY = 312f
+    val yVal = screenY.value
+    
+    val fraction = when {
+        yVal >= startFadeY -> 1f
+        yVal <= endFadeY -> 0f
+        else -> (yVal - endFadeY) / (startFadeY - endFadeY)
+    }
+    
+    val alphaVal = fraction
+    val blurRadius = (1f - fraction) * 16.7f
+    
+    return this
+        .graphicsLayer {
+            alpha = alphaVal
+        }
+        .let {
+            if (blurRadius > 0.1f) {
+                it.safeBlur(blurRadius.dp)
+            } else {
+                it
+            }
+        }
 }
 
 class MainActivity : ComponentActivity() {
@@ -328,6 +368,11 @@ fun TaskAlarmHomeScreen() {
         return
     }
 
+    if (currentScreen == AppScreen.Streak) {
+        StreakScreen(onBack = { currentScreen = AppScreen.Home })
+        return
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -443,7 +488,7 @@ fun TaskAlarmHomeScreen() {
                     .clickable(
                         interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                         indication = null
-                    ) { currentScreen = AppScreen.Patterns }
+                    ) { currentScreen = AppScreen.Streak }
             )
             // Notification Icon
             Image(
@@ -1134,6 +1179,8 @@ private fun drawCenteredSignature(
     nativeCanvas.restore()
 }
 
+@Suppress("SupportAnnotationUsage")
+@android.annotation.SuppressLint("SupportAnnotationUsage")
 @Composable
 fun SigningScreen(
     task: TaskAlarm,
@@ -1420,10 +1467,11 @@ fun SigningScreen(
             modifier = Modifier
                 .align(Alignment.Center)
                 .offset(x = 34.dp, y = 84.dp)
-                .fillMaxWidth(1.9f)
+                .fillMaxWidth()
                 .height(680.dp)
                 .graphicsLayer {
                     alpha = glareAlpha * 0.95f
+                    scaleX = 1.9f
                     translationX = backgroundGlareOffsetX.dp.toPx()
                     translationY = backgroundGlareOffsetY.dp.toPx()
                 }
@@ -2073,9 +2121,11 @@ fun SigningScreen(
                                 contentDescription = null,
                                 modifier = Modifier
                                     .align(Alignment.Center)
-                                    .fillMaxWidth(2.35f)
-                                    .fillMaxHeight(1.36f)
+                                    .fillMaxWidth()
+                                    .fillMaxHeight()
                                     .graphicsLayer {
+                                        scaleX = 2.35f
+                                        scaleY = 1.36f
                                         translationX = (glareOffsetX * 0.62f).dp.toPx() + 10.dp.toPx()
                                         translationY = (glareOffsetY * 0.62f).dp.toPx() - 18.dp.toPx()
                                     },
@@ -2114,9 +2164,11 @@ fun SigningScreen(
                                 contentDescription = null,
                                 modifier = Modifier
                                     .align(Alignment.Center)
-                                    .fillMaxWidth(2.35f)
-                                    .fillMaxHeight(1.36f)
+                                    .fillMaxWidth()
+                                    .fillMaxHeight()
                                     .graphicsLayer {
+                                        scaleX = 2.35f
+                                        scaleY = 1.36f
                                         translationX = (glareOffsetX * 0.62f).dp.toPx() + 10.dp.toPx()
                                         translationY = (glareOffsetY * 0.62f).dp.toPx() - 18.dp.toPx()
                                     },
@@ -2288,5 +2340,583 @@ fun SigningScreen(
         }
 
 
+    }
+}
+
+private data class MonthConfig(
+    val name: String,
+    val year: Int,
+    val monthVal: Int,
+    val daysCount: Int,
+    val offset: Int
+)
+
+class StreakViewModel : ViewModel() {
+    private val _streakResult = MutableStateFlow<StreakResult>(
+        StreakResult(0, java.time.LocalDate.now(), java.time.LocalDate.now())
+    )
+    val streakResult: StateFlow<StreakResult> = _streakResult.asStateFlow()
+    
+    private val _completionDates = MutableStateFlow<List<String>>(emptyList())
+    val completionDates: StateFlow<List<String>> = _completionDates.asStateFlow()
+
+    fun refresh(context: Context) {
+        val stats = TaskStorage.getStats(context)
+        _completionDates.value = stats.completionDates ?: emptyList()
+        val result = computeCurrentStreak(stats.completionDates)
+        _streakResult.value = result
+    }
+}
+
+@Composable
+fun StreakScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val viewModel: StreakViewModel = remember { StreakViewModel() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refresh(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val streakResult by viewModel.streakResult.collectAsStateWithLifecycle()
+    val completionDates by viewModel.completionDates.collectAsStateWithLifecycle()
+
+    val months = listOf(
+        MonthConfig("JAN", 2026, 1, 31, 4),
+        MonthConfig("FEB", 2026, 2, 28, 0),
+        MonthConfig("MAR", 2026, 3, 31, 0),
+        MonthConfig("APR", 2026, 4, 30, 3),
+        MonthConfig("MAY", 2026, 5, 31, 5),
+        MonthConfig("JUN", 2026, 6, 30, 1),
+        MonthConfig("JUL", 2026, 7, 31, 3),
+        MonthConfig("AUG", 2026, 8, 31, 6),
+        MonthConfig("SEP", 2026, 9, 30, 2),
+        MonthConfig("OCT", 2026, 10, 31, 4),
+        MonthConfig("NOV", 2026, 11, 30, 0),
+        MonthConfig("DEC", 2026, 12, 31, 2)
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFE1E2E6)) // Figma background color
+    ) {
+        // 1. Scrollable Month Container (Behind the header background)
+        val scrollState = rememberScrollState()
+        val density = LocalDensity.current
+        val scrollOffsetDp = with(density) { scrollState.value.toDp() }
+
+        val monthHeights = remember {
+            months.map { month ->
+                val totalSlots = month.offset + month.daysCount
+                val rowsCount = (totalSlots + 6) / 7
+                40.dp + (rowsCount * 52 - 4).dp + 24.dp
+            }
+        }
+
+        val monthTops = remember(monthHeights) {
+            var accum = 46.dp
+            val tops = mutableListOf<androidx.compose.ui.unit.Dp>()
+            for (height in monthHeights) {
+                tops.add(accum)
+                accum += height
+            }
+            tops
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .padding(top = 312.dp) // Starts at the week labels to allow scroll overlap
+                .verticalScroll(scrollState)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(modifier = Modifier.height(46.dp))
+
+                months.forEachIndexed { i, month ->
+                    val monthTop = monthTops[i]
+                    val monthHeight = monthHeights[i]
+
+                    Box(
+                        modifier = Modifier
+                            .width(360.dp)
+                            .height(monthHeight)
+                    ) {
+                        // Month Label on the right
+                        val labelScreenY = 312.dp + monthTop - scrollOffsetDp
+                        Text(
+                            text = month.name,
+                            fontFamily = AppSatoshiFontFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 16.sp,
+                            color = Color(0xFF3A3A3A),
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(y = 0.dp)
+                                .scrollFadeBlur(labelScreenY)
+                        )
+
+                        // Month Grid Box
+                        val monthStart = java.time.LocalDate.of(month.year, month.monthVal, 1)
+                        val monthEnd = java.time.LocalDate.of(month.year, month.monthVal, month.daysCount)
+                        
+                        val overlapDaysRange = if (streakResult.currentStreakCount > 0) {
+                            val start = streakResult.streakStartDate
+                            val end = streakResult.streakEndDate
+                            
+                            val overlapStart = if (start.isBefore(monthStart)) monthStart else if (start.isAfter(monthEnd)) null else start
+                            val overlapEnd = if (end.isBefore(monthStart)) null else if (end.isAfter(monthEnd)) monthEnd else end
+                            
+                            if (overlapStart != null && overlapEnd != null && !overlapStart.isAfter(overlapEnd)) {
+                                overlapStart.dayOfMonth..overlapEnd.dayOfMonth
+                            } else {
+                                null
+                            }
+                        } else {
+                            null
+                        }
+
+                        val totalSlots = month.offset + month.daysCount
+                        val daysList = (1..totalSlots).map { slot ->
+                            if (slot <= month.offset) {
+                                null
+                            } else {
+                                val day = slot - month.offset
+                                val dateStr = String.format(java.util.Locale.US, "%04d-%02d-%02d", month.year, month.monthVal, day)
+                                day to completionDates.contains(dateStr)
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .offset(x = 0.dp, y = 40.dp)
+                                .width(360.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                val chunkSize = 7
+                                val rows = daysList.chunked(chunkSize)
+                                rows.forEachIndexed { rowIndex, rowDays ->
+                                    val rowScreenY = 312.dp + monthTop + 40.dp + (rowIndex * 52).dp - scrollOffsetDp
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.scrollFadeBlur(rowScreenY)
+                                    ) {
+                                        rowDays.forEach { slot ->
+                                            if (slot == null) {
+                                                Box(modifier = Modifier.size(48.dp))
+                                            } else {
+                                                val (day, isActive) = slot
+                                                if (overlapDaysRange != null && day in overlapDaysRange) {
+                                                    Box(modifier = Modifier.size(48.dp))
+                                                } else {
+                                                    CalendarDateCell(day = day, isActive = isActive)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Draw StreakHighlightPills dynamically for this month
+                            if (overlapDaysRange != null) {
+                                val startDay = overlapDaysRange.first
+                                val endDay = overlapDaysRange.last
+                                val startSlot = startDay + month.offset - 1
+                                val endSlot = endDay + month.offset - 1
+                                val startRow = startSlot / 7
+                                val endRow = endSlot / 7
+                                for (r in startRow..endRow) {
+                                    val rowStartSlot = maxOf(startSlot, r * 7)
+                                    val rowEndSlot = minOf(endSlot, r * 7 + 6)
+                                    if (rowStartSlot <= rowEndSlot) {
+                                        val startCol = rowStartSlot % 7
+                                        val endCol = rowEndSlot % 7
+                                        val numDays = endCol - startCol + 1
+                                        val x = (startCol * 52).dp
+                                        val y = (r * 52).dp
+                                        val width = (numDays * 48 + (numDays - 1) * 4).dp
+                                        val pillDays = (rowStartSlot - month.offset + 1 .. rowEndSlot - month.offset + 1).toList()
+                                        val pillScreenY = 312.dp + monthTop + 40.dp + (r * 52).dp - scrollOffsetDp
+                                        StreakHighlightPill(
+                                            days = pillDays,
+                                            modifier = Modifier
+                                                .offset(x = x, y = y)
+                                                .width(width)
+                                                .height(48.dp)
+                                                .scrollFadeBlur(pillScreenY)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(56.dp))
+            }
+        }
+
+        // 2. Layer-Blurred Header Background (Overlaying the scrollable content)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(312.dp)
+                .graphicsLayer { clip = false } // Allow glare to render beyond container boundary
+        ) {
+            // Underlay background color with blur to match the original frost overlay
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFFE1E2E6))
+                    .safeBlur(16.7.dp, BlurredEdgeTreatment.Unbounded)
+            )
+
+            // ── Decorative Figma Glare Stripes ──
+            // Figma uses solid white rectangles (w=49.762dp, tall) rotated -48.48°
+            // with 16.05dp blur. They naturally soft-merge into the gray background
+            // without needing BlendMode.Screen or PNG assets.
+
+            // Rectangle 22 (714:230) — Secondary edge glare
+            // Container: 252.95 x 231.98, offset (-39, 128.39)
+            // Inner white bar: 49.762 x 293.771, rounded 7dp, rotated -48.48°, blur 16.05dp
+            Box(
+                modifier = Modifier
+                    .offset(x = (-39).dp, y = 128.39.dp)
+                    .size(width = 252.95.dp, height = 231.98.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 49.762.dp, height = 293.771.dp)
+                        .graphicsLayer { rotationZ = -48.48f }
+                        .safeBlur(16.05.dp, BlurredEdgeTreatment.Unbounded)
+                        .background(Color.White.copy(alpha = 0.30f), RoundedCornerShape(7.dp))
+                )
+            }
+
+            // Rectangle 23 (714:231) — Primary main glare (largest)
+            // Using exported Figma glare PNG asset, edge-to-edge
+            Box(
+                modifier = Modifier
+                    .fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.rectangle_23),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxSize(),
+                    contentScale = ContentScale.FillBounds
+                )
+            }
+
+            // Rectangle 24 (714:232) — Third glare
+            // Repositioned to upper third of hero so it doesn't overlap day labels
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(x = 75.dp, y = (-20).dp)
+                    .size(width = 346.85.dp, height = 180.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 49.762.dp, height = 280.dp)
+                        .graphicsLayer { rotationZ = -48.48f }
+                        .safeBlur(16.05.dp, BlurredEdgeTreatment.Unbounded)
+                        .background(Color.White.copy(alpha = 0.45f))
+                )
+            }
+        }
+
+        // 3. Crisp Header Content (Rendered on top of the blurred background)
+        // Back Button
+        Box(
+            modifier = Modifier
+                .padding(start = 24.dp, top = 56.dp)
+                .size(48.dp)
+                .background(Color.White.copy(alpha = 0.2f), CircleShape)
+                .border(
+                    width = 1.dp,
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color.White.copy(alpha = 0.8f), Color.White.copy(alpha = 0.1f))
+                    ),
+                    shape = CircleShape
+                )
+                .clip(CircleShape)
+                .clickable { onBack() },
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                painter = painterResource(R.drawable.back_button),
+                contentDescription = "Back",
+                modifier = Modifier.size(20.dp).offset(x = (-2).dp),
+                contentScale = ContentScale.Fit
+            )
+        }
+
+        // Header: "Streak" Title + Line + Watermark Number
+        // Original values documented (Step 1):
+        // Header Text:
+        // - text = "Streak"
+        // - fontFamily = AppDentonFontFamily
+        // - fontWeight = FontWeight.Medium
+        // - fontSize = 32.sp
+        // - color = Color(0xFF3A3A3A)
+        // - textAlign = TextAlign.Center
+        // Divider:
+        // - Box width = 93.dp, height = 1.dp, background = Color(0xFFD5D5D5)
+        // Column padding: top = 54.dp
+        // Spacer height = 4.dp
+        // Watermark Box padding: top = 127.dp
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 54.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Title block sized to the intrinsic width of the text so the underline matches it
+            Column(
+                modifier = Modifier.width(IntrinsicSize.Min),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Streak title text styled exactly to Figma node 672:168 specifications:
+                // - Vertical gradient from #D3D3D3 to #A4A3A3
+                // - Text shadow: 0px 1px 0.3px rgba(243, 243, 243, 0.59)
+                Text(
+                    text = "Streak",
+                    fontFamily = AppDentonFontFamily,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = 32.sp,
+                    style = TextStyle(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFFD3D3D3),
+                                Color(0xFFA4A3A3)
+                            )
+                        ),
+                        shadow = Shadow(
+                            color = Color(0xFFF3F3F3).copy(alpha = 0.59f),
+                            offset = Offset(0f, 1f),
+                            blurRadius = 0.3f
+                        )
+                    ),
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                // Underline divider matching the text width (Step 6)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(0.5.dp)
+                        .background(Color(0xFFC8C8C8).copy(alpha = 0.5f))
+                )
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = streakResult.currentStreakCount.toString(),
+                    fontFamily = AppDentonFontFamily,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = 128.sp,
+                    color = Color(0xFF191919),
+                    style = TextStyle(
+                        shadow = Shadow(
+                            color = Color(0xFF505050).copy(alpha = 0.45f),
+                            offset = Offset(1f, 1f),
+                            blurRadius = 4.1f
+                        )
+                    )
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Days",
+                    fontFamily = AppDentonFontFamily,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = 32.sp,
+                    color = Color(0xFFA4A3A3),
+                    modifier = Modifier.padding(bottom = 24.dp)
+                )
+            }
+        }
+
+        // S M T W T F S Labels row at top = 312.dp
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = 312.dp)
+                .width(360.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            val dayLabels = listOf("S", "M", "T", "W", "T", "F", "S")
+            dayLabels.forEach { label ->
+                Text(
+                    text = label,
+                    fontFamily = AppSatoshiFontFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 16.sp,
+                    color = Color(0xFF757575),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.width(48.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun CalendarDateCell(day: Int, isActive: Boolean) {
+    val cellGrad = if (isActive) {
+        Brush.radialGradient(colors = listOf(Color(0xFFFFFFFF), Color(0xFFEFEFEF)))
+    } else {
+        Brush.radialGradient(colors = listOf(Color(0xFFF2F2F2), Color(0xFFEFEFEF)))
+    }
+    val textColor = if (isActive) Color(0xFF393939) else Color(0xFFA7A7A7)
+    
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .shadow(
+                elevation = 2.dp,
+                shape = RoundedCornerShape(8.dp),
+                ambientColor = Color(0x82A7A7A7),
+                spotColor = Color(0x82A7A7A7)
+            )
+            .background(cellGrad, RoundedCornerShape(8.dp))
+            .border(1.2.dp, Color(0xFFFEFFFF), RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = day.toString(),
+            fontFamily = AppSatoshiFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = 16.sp,
+            color = textColor
+        )
+    }
+}
+
+@Composable
+fun StreakHighlightPill(days: List<Int>, modifier: Modifier = Modifier) {
+    val localDensity = LocalDensity.current
+    
+    val brush15 = Brush.verticalGradient(
+        colorStops = arrayOf(
+            0.159f to Color.White,
+            0.841f to Color(0xFFC6C6C6)
+        )
+    )
+    val brushMiddle = Brush.verticalGradient(
+        colorStops = arrayOf(
+            0.486f to Color.White,
+            1.0f to Color(0xFF323232)
+        )
+    )
+    val brush19 = Brush.verticalGradient(
+        colorStops = arrayOf(
+            0.486f to Color.White,
+            1.0f to Color(0xFF999999)
+        )
+    )
+    
+    Box(
+        modifier = modifier
+            .drawBehind {
+                drawIntoCanvas { canvas ->
+                    val nativeCanvas = canvas.nativeCanvas
+                    
+                    val paint1 = android.graphics.Paint().apply {
+                        isAntiAlias = true
+                        color = android.graphics.Color.BLACK
+                        setShadowLayer(
+                            7.1.dp.toPx(),
+                            5.dp.toPx(),
+                            0.dp.toPx(),
+                            android.graphics.Color.argb((0.31f * 255).toInt(), 0, 0, 0)
+                        )
+                    }
+                    nativeCanvas.drawRoundRect(
+                        0f, 0f, size.width, size.height,
+                        8.dp.toPx(), 8.dp.toPx(),
+                        paint1
+                    )
+                    
+                    val paint2 = android.graphics.Paint().apply {
+                        isAntiAlias = true
+                        color = android.graphics.Color.BLACK
+                        setShadowLayer(
+                            10.9.dp.toPx(),
+                            0.dp.toPx(),
+                            12.dp.toPx(),
+                            android.graphics.Color.argb((0.37f * 255).toInt(), 0, 0, 0)
+                        )
+                    }
+                    nativeCanvas.drawRoundRect(
+                        0f, 0f, size.width, size.height,
+                        8.dp.toPx(), 8.dp.toPx(),
+                        paint2
+                    )
+                }
+            }
+            .background(Color(0xFF000000), RoundedCornerShape(8.dp))
+            .border(1.2.dp, Color(0xFFDBDBDB), RoundedCornerShape(8.dp))
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            days.forEach { day ->
+                val brush = when (day) {
+                    days.first() -> brush15
+                    days.last() -> brush19
+                    else -> brushMiddle
+                }
+                
+                Box(
+                    modifier = Modifier.size(48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = day.toString(),
+                            fontFamily = AppSatoshiFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = Color(0xFFA7A7A7).copy(alpha = 0.51f),
+                            modifier = Modifier.safeBlur(2.4.dp)
+                        )
+                        Text(
+                            text = day.toString(),
+                            fontFamily = AppSatoshiFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            style = TextStyle(
+                                brush = brush,
+                                shadow = Shadow(
+                                    color = Color(0xFFA7A7A7).copy(alpha = 0.51f),
+                                    offset = Offset.Zero,
+                                    blurRadius = with(localDensity) { 2.4.dp.toPx() }
+                                )
+                            )
+                        )
+                    }
+                }
+            }
+        }
     }
 }

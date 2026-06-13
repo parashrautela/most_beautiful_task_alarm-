@@ -27,7 +27,8 @@ data class TaskStats(
     val avgDelayHours: Float,
     val delayRecordsCount: Int,
     val activeHours: List<Int>, // 9 buckets: 6AM, 8AM, 10AM, 12PM, 2PM, 4PM, 6PM, 8PM, 10PM
-    val droppedTasks: List<DroppedTaskInfo>
+    val droppedTasks: List<DroppedTaskInfo>,
+    val completionDates: List<String>? = emptyList()
 )
 
 object TaskStorage {
@@ -80,6 +81,7 @@ object TaskStorage {
         val json = prefs.getString(STATS_KEY, null)
         if (json == null) {
             // Seed initial statistics to match Figma design
+            val today = java.time.LocalDate.now()
             val defaultStats = TaskStats(
                 completedCount = 2,
                 rescheduledCount = 0,
@@ -91,13 +93,25 @@ object TaskStorage {
                     DroppedTaskInfo("Review project proposal", 3),
                     DroppedTaskInfo("Update documentation", 2),
                     DroppedTaskInfo("Team standup meeting", 1)
+                ),
+                completionDates = listOf(
+                    today.minusDays(4).toString(),
+                    today.minusDays(3).toString(),
+                    today.minusDays(2).toString(),
+                    today.minusDays(1).toString(),
+                    today.toString()
                 )
             )
             saveStats(context, defaultStats)
             return defaultStats
         }
         val type = object : TypeToken<TaskStats>() {}.type
-        return gson.fromJson(json, type)
+        val stats: TaskStats = gson.fromJson(json, type)
+        return if (stats.completionDates == null) {
+            stats.copy(completionDates = emptyList())
+        } else {
+            stats
+        }
     }
 
     private fun saveStats(context: Context, stats: TaskStats) {
@@ -132,11 +146,19 @@ object TaskStorage {
         val newActiveHours = currentStats.activeHours.toMutableList()
         newActiveHours[bucketIndex] = newActiveHours[bucketIndex] + 1
 
+        // Record the completion date
+        val todayStr = java.time.LocalDate.now().toString()
+        val newCompletionDates = (currentStats.completionDates ?: emptyList()).toMutableList()
+        if (!newCompletionDates.contains(todayStr)) {
+            newCompletionDates.add(todayStr)
+        }
+
         val updatedStats = currentStats.copy(
             completedCount = newCompletedCount,
             avgDelayHours = newAvgDelay,
             delayRecordsCount = newRecordsCount,
-            activeHours = newActiveHours
+            activeHours = newActiveHours,
+            completionDates = newCompletionDates
         )
         saveStats(context, updatedStats)
     }
@@ -170,4 +192,62 @@ object TaskStorage {
         )
         saveStats(context, updatedStats)
     }
+}
+
+data class StreakResult(
+    val currentStreakCount: Int,
+    val streakStartDate: java.time.LocalDate,
+    val streakEndDate: java.time.LocalDate
+)
+
+fun computeCurrentStreak(completionDates: List<String>?): StreakResult {
+    // Explanation of data structure and assumptions:
+    // This function reads from a list of ISO-8601 date strings (e.g. "2026-06-13")
+    // stored in TaskStats under SharedPreferences. It assumes that dates are correctly
+    // parsed into LocalDate, ignores invalid formats, and automatically deduplicates
+    // them into a set to count one completion day regardless of the number of completed tasks.
+    // The streak walks backward starting from today or yesterday to establish the active consecutive run.
+    
+    val dates = completionDates ?: return StreakResult(0, java.time.LocalDate.now(), java.time.LocalDate.now())
+    if (dates.isEmpty()) {
+        return StreakResult(0, java.time.LocalDate.now(), java.time.LocalDate.now())
+    }
+    
+    val completedDays = dates.mapNotNull {
+        try {
+            java.time.LocalDate.parse(it)
+        } catch (e: Exception) {
+            null
+        }
+    }.toSet()
+    
+    if (completedDays.isEmpty()) {
+        return StreakResult(0, java.time.LocalDate.now(), java.time.LocalDate.now())
+    }
+    
+    val today = java.time.LocalDate.now()
+    val yesterday = today.minusDays(1)
+    
+    val mostRecentStreakDate = when {
+        completedDays.contains(today) -> today
+        completedDays.contains(yesterday) -> yesterday
+        else -> null
+    }
+    
+    if (mostRecentStreakDate == null) {
+        return StreakResult(0, today, today)
+    }
+    
+    var currentCount = 0
+    var checkDate: java.time.LocalDate = mostRecentStreakDate
+    val streakEndDate = mostRecentStreakDate
+    
+    while (completedDays.contains(checkDate)) {
+        currentCount++
+        checkDate = checkDate.minusDays(1)
+    }
+    
+    val streakStartDate = mostRecentStreakDate.minusDays((currentCount - 1).toLong())
+    
+    return StreakResult(currentCount, streakStartDate, streakEndDate)
 }
