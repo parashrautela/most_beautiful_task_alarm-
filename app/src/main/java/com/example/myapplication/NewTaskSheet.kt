@@ -731,7 +731,7 @@ private fun NewTaskSheetContent(
             onSlideComplete = {
                 val alarmDateTime = java.time.LocalDateTime.of(selectedDate, selectedTime)
                 val task = TaskAlarm(
-                    title = if (title.isEmpty()) "Task Alarm" else title,
+                    title = if (title.isEmpty()) "Oath" else title,
                     description = if (description.isEmpty()) "Time to get things done!" else description,
                     dateTime = alarmDateTime.toString(),
                     priority = selectedPriority

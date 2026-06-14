@@ -21,7 +21,7 @@ class AlarmService : Service() {
     private var vibrator: Vibrator? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val title = intent?.getStringExtra("TASK_TITLE") ?: "Task Alarm"
+        val title = intent?.getStringExtra("TASK_TITLE") ?: "Oath"
         val desc = intent?.getStringExtra("TASK_DESC") ?: "Time to get things done!"
         val taskId = intent?.getStringExtra("TASK_ID") ?: ""
         val action = intent?.action

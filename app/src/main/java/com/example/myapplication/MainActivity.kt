@@ -244,7 +244,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyApplicationTheme {
                 val currentTaskId = activeSigningTaskId.value
-                val currentTaskTitle = activeSigningTaskTitle.value ?: "Task Alarm"
+                val currentTaskTitle = activeSigningTaskTitle.value ?: "Oath"
                 val currentTaskDesc = activeSigningTaskDesc.value ?: "Time to get things done!"
 
                 if (currentTaskId != null) {
@@ -324,7 +324,7 @@ class MainActivity : ComponentActivity() {
             
             
             val taskId = intent.getStringExtra("TASK_ID")
-            val taskTitle = intent.getStringExtra("TASK_TITLE") ?: "Task Alarm"
+            val taskTitle = intent.getStringExtra("TASK_TITLE") ?: "Oath"
             val taskDesc = intent.getStringExtra("TASK_DESC") ?: "Time to get things done!"
             if (!taskId.isNullOrEmpty()) {
                 setActiveSigningTaskData(taskId, taskTitle, taskDesc)
@@ -455,7 +455,7 @@ fun TaskAlarmHomeScreen() {
                 .padding(start = 22.dp, top = 35.dp)
         ) {
             Text(
-                text = "Task Alarm",
+                text = "Oath",
                 fontFamily = DentonFontFamily,
                 fontWeight = FontWeight.Medium,
                 fontSize = 36.sp,

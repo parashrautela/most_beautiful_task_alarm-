@@ -11,7 +11,7 @@ import androidx.core.app.NotificationCompat
 
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val taskTitle = intent.getStringExtra("TASK_TITLE") ?: "Task Alarm"
+        val taskTitle = intent.getStringExtra("TASK_TITLE") ?: "Oath"
         val taskDesc = intent.getStringExtra("TASK_DESC") ?: "Time to get things done!"
         val taskId = intent.getStringExtra("TASK_ID") ?: ""
 
