@@ -126,7 +126,7 @@ fun WaveformPicker(
                         
                         // STAGE 7 — CLAMP AND BOUND THE SCROLL RANGE WITH RUBBER BANDING
                         val minOffset = -(maxValue * itemSpacing)
-                        val maxOffset = 0f
+                        val maxOffset = maxValue * itemSpacing
                         val proposedOffset = scrollOffset.value + smoothedDelta
 
                         val clampedOffset = when {
@@ -145,7 +145,7 @@ fun WaveformPicker(
                         )
 
                         // STAGE 4 — HAPTIC TICK ON VALUE TRANSITIONS
-                        val currentIndex = (-clampedOffset / itemSpacing).roundToInt().coerceIn(0, maxValue)
+                        val currentIndex = (-clampedOffset / itemSpacing).roundToInt().coerceIn(-maxValue, maxValue)
                         if (currentIndex != previousSelectedValue.intValue) {
                             view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                             previousSelectedValue.intValue = currentIndex
@@ -158,7 +158,7 @@ fun WaveformPicker(
                     val velocity = velocityTracker.calculateVelocity().x
                     scope.launch {
                         val minOffset = -(maxValue * itemSpacing)
-                        val maxOffset = 0f
+                        val maxOffset = maxValue * itemSpacing
 
                         // Momentum animation: only decay if we are within valid bounds
                         if (scrollOffset.value in minOffset..maxOffset) {
@@ -171,7 +171,7 @@ fun WaveformPicker(
                                     )
                                 ) {
                                     // Trigger haptics during momentum decay
-                                    val currentIndex = (-value / itemSpacing).roundToInt().coerceIn(0, maxValue)
+                                    val currentIndex = (-value / itemSpacing).roundToInt().coerceIn(-maxValue, maxValue)
                                     if (currentIndex != previousSelectedValue.intValue) {
                                         view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                         previousSelectedValue.intValue = currentIndex
@@ -185,7 +185,7 @@ fun WaveformPicker(
                         
                         // STAGE 7 — SNAP BACK TO NEAREST BOUNDARY/VALUE
                         val rawNearest = (-scrollOffset.value / itemSpacing).roundToInt()
-                        val nearestIndex = rawNearest.coerceIn(0, maxValue)
+                        val nearestIndex = rawNearest.coerceIn(-maxValue, maxValue)
                         val nearestValue = -nearestIndex * itemSpacing
 
                         scrollOffset.animateTo(

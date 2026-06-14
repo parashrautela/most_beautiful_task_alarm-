@@ -581,12 +581,13 @@ fun AlarmDetailScreen(
 
     if (showTimePicker) {
         val currentDateTime = java.time.LocalDateTime.parse(currentTask.dateTime)
+        val newDate = selectedRescheduleDate ?: currentDateTime.toLocalDate()
         TimePickerSheet(
             initialTime = currentDateTime.toLocalTime(),
+            selectedDate = newDate,
             onDismiss = { showTimePicker = false },
             onTimeSelected = { time ->
                 showTimePicker = false
-                val newDate = selectedRescheduleDate ?: currentDateTime.toLocalDate()
                 val newDateTime = java.time.LocalDateTime.of(newDate, time)
                 
                 val updatedTask = currentTask.copy(
@@ -595,6 +596,14 @@ fun AlarmDetailScreen(
                 )
                 TaskStorage.updateTask(context, updatedTask)
                 TaskStorage.logReschedule(context)
+                
+                AlarmScheduler.scheduleAlarm(
+                    context = context,
+                    time = newDateTime,
+                    title = updatedTask.title,
+                    description = updatedTask.description,
+                    taskId = updatedTask.id
+                )
                 
                 currentTask = updatedTask
             }

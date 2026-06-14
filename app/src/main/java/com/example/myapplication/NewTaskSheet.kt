@@ -266,7 +266,8 @@ fun NewTaskSheet(onDismiss: () -> Unit) {
             onTimeSelected = { newTime ->
                 selectedFullTime = newTime
             },
-            initialTime = selectedFullTime
+            initialTime = selectedFullTime,
+            selectedDate = selectedFullDate
         )
     }
 }
@@ -719,7 +720,14 @@ private fun NewTaskSheetContent(
 
         // ── Slide-to-Set CTA ─────────────────────────────────────────────
         val context = androidx.compose.ui.platform.LocalContext.current
+        val isDateTimeValid = remember(selectedDate, selectedTime) {
+            val alarmDateTime = java.time.LocalDateTime.of(selectedDate, selectedTime)
+            alarmDateTime.isAfter(java.time.LocalDateTime.now())
+        }
+
         SlideToSetButton(
+            enabled = isDateTimeValid,
+            idleText = if (isDateTimeValid) "SLIDE TO SET" else "SELECT FUTURE TIME",
             onSlideComplete = {
                 val alarmDateTime = java.time.LocalDateTime.of(selectedDate, selectedTime)
                 val task = TaskAlarm(
@@ -820,6 +828,7 @@ fun SlideToSetButton(
     idleText: String = "SLIDE TO SET",
     successText: String = "\u201c Lets make it count \u201d",
     useSoftDepth: Boolean = false,
+    enabled: Boolean = true,
 ) {
     val view = LocalView.current
     val context = view.context
@@ -879,7 +888,7 @@ fun SlideToSetButton(
     }
 
     val draggableState = rememberDraggableState { delta ->
-        if (maxOffset > 0f && !isComplete) {
+        if (enabled && maxOffset > 0f && !isComplete) {
             val oldOffset = offsetAnim.value
             val newOffset = (oldOffset + delta).coerceIn(0f, maxOffset)
             scope.launch { offsetAnim.snapTo(newOffset) }
@@ -1062,22 +1071,39 @@ fun SlideToSetButton(
         // Background Gradient: Interpolate between white and a premium dark gradient
         val thumbStartColor = androidx.compose.ui.graphics.lerp(Color.White, Color(0xFF3E3E3E), transitionProgress)
         val thumbEndColor = androidx.compose.ui.graphics.lerp(Color.White, Color(0xFF1B1B1B), transitionProgress)
-        val thumbBrush = Brush.verticalGradient(listOf(thumbStartColor, thumbEndColor))
+        val thumbBrush = if (enabled) {
+            Brush.verticalGradient(listOf(thumbStartColor, thumbEndColor))
+        } else {
+            Brush.verticalGradient(listOf(Color(0xFFF3F4F6), Color(0xFFE5E7EB)))
+        }
 
         // Border: A subtle highlight stroke that appears as we reach success
         val borderAlpha = transitionProgress
-        val borderBrush = Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = 0.3f * borderAlpha),
-                Color.Black.copy(alpha = 0.1f * borderAlpha)
+        val borderBrush = if (enabled) {
+            Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.3f * borderAlpha),
+                    Color.Black.copy(alpha = 0.1f * borderAlpha)
+                )
             )
-        )
+        } else {
+            Brush.verticalGradient(
+                listOf(
+                    Color.Transparent,
+                    Color.Transparent
+                )
+            )
+        }
         
-        val thumbIconColor = androidx.compose.ui.graphics.lerp(
-            Color.Black, 
-            Color.White, 
-            transitionProgress
-        )
+        val thumbIconColor = if (enabled) {
+            androidx.compose.ui.graphics.lerp(
+                Color.Black, 
+                Color.White, 
+                transitionProgress
+            )
+        } else {
+            Color(0xFF9CA3AF)
+        }
 
         Box(
             modifier = Modifier
@@ -1086,7 +1112,7 @@ fun SlideToSetButton(
                 .size(CtaCircleSize)
                 // Sharper shadow to prevent "weird blur" look
                 .shadow(
-                    elevation = 4.dp, 
+                    elevation = if (enabled) 4.dp else 0.dp, 
                     shape = CircleShape,
                     spotColor = Color.Black.copy(alpha = 0.4f)
                 )
@@ -1095,6 +1121,7 @@ fun SlideToSetButton(
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = draggableState,
+                    enabled = enabled,
                     onDragStarted = {
                         isDragging = true
                         travelSinceLastBuzz = 0f

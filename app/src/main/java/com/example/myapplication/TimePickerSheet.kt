@@ -72,6 +72,7 @@ fun TimePickerSheet(
     onDismiss: () -> Unit,
     onTimeSelected: (LocalTime) -> Unit,
     initialTime: LocalTime = LocalTime.now(),
+    selectedDate: java.time.LocalDate = java.time.LocalDate.now(),
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val view = LocalView.current
@@ -79,8 +80,13 @@ fun TimePickerSheet(
     // For visual display in the sheet
     var currentDisplayTime by remember { mutableStateOf(initialTime) }
 
-    // Capture the initial time once to avoid feedback loops when parent state updates
-    val baseTime = remember { initialTime }
+    // Capture the current time once to avoid feedback loops when parent state updates
+    val baseTime = remember { LocalTime.now() }
+
+    val isDateTimeValid = remember(selectedDate, currentDisplayTime) {
+        val selectedDateTime = java.time.LocalDateTime.of(selectedDate, currentDisplayTime)
+        selectedDateTime.isAfter(java.time.LocalDateTime.now())
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -223,7 +229,7 @@ fun TimePickerSheet(
                 contentAlignment = Alignment.Center
             ) {
                 val diff = java.time.temporal.ChronoUnit.MINUTES.between(baseTime, currentDisplayTime).toInt()
-                val initialIndex = if (diff < 0) diff + 1440 else diff
+                val initialIndex = diff
                 WaveformPicker(
                     initialIndex = initialIndex,
                     maxValue = 1440,
@@ -376,56 +382,75 @@ fun TimePickerSheet(
                             )
                         }
                         
-                        drawIntoCanvas { canvas ->
-                            canvas.drawPath(ambientPath, ambientPaint)
-                            canvas.drawPath(tightPath, tightPaint)
-                            canvas.drawPath(glowPath, glowPaint)
+                        if (isDateTimeValid) {
+                            drawIntoCanvas { canvas ->
+                                canvas.drawPath(ambientPath, ambientPaint)
+                                canvas.drawPath(tightPath, tightPaint)
+                                canvas.drawPath(glowPath, glowPaint)
+                            }
                         }
                     }
                     .background(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0xFF3C3C3C), // Smooth top highlight gray
-                                Color(0xFF1E1E1E), // Soft midtone
-                                Color(0xFF080808)  // Pure deep black at bottom
+                        brush = if (isDateTimeValid) {
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFF3C3C3C), // Smooth top highlight gray
+                                    Color(0xFF1E1E1E), // Soft midtone
+                                    Color(0xFF080808)  // Pure deep black at bottom
+                                )
                             )
-                        ),
+                        } else {
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFFF3F4F6),
+                                    Color(0xFFE5E7EB)
+                                )
+                            )
+                        },
                         shape = RoundedCornerShape(34.dp)
                     )
                     // Stacked Inset Shadow 1: Subtle top highlight simulating soft overhead lighting
-                    .neomorphicInnerShadow(
-                        shape = RoundedCornerShape(34.dp),
-                        color = Color.White.copy(alpha = 0.10f),
-                        blur = 4.dp,
-                        offsetX = 0.dp,
-                        offsetY = 3.dp
+                    .then(
+                        if (isDateTimeValid) {
+                            Modifier.neomorphicInnerShadow(
+                                shape = RoundedCornerShape(34.dp),
+                                color = Color.White.copy(alpha = 0.10f),
+                                blur = 4.dp,
+                                offsetX = 0.dp,
+                                offsetY = 3.dp
+                            )
+                        } else Modifier
                     )
                     // Stacked Inset Shadow 2: Premium 3D diagonal light reflection
-                    .neomorphicInnerShadow(
-                        shape = RoundedCornerShape(34.dp),
-                        color = Color.White.copy(alpha = 0.08f),
-                        blur = 6.8.dp,
-                        offsetX = 4.dp,
-                        offsetY = 4.dp
+                    .then(
+                        if (isDateTimeValid) {
+                            Modifier.neomorphicInnerShadow(
+                                shape = RoundedCornerShape(34.dp),
+                                color = Color.White.copy(alpha = 0.08f),
+                                blur = 6.8.dp,
+                                offsetX = 4.dp,
+                                offsetY = 4.dp
+                            )
+                        } else Modifier
                     )
                     .border(
-                        BorderStroke(1.dp, Color.Black),
+                        BorderStroke(1.dp, if (isDateTimeValid) Color.Black else Color(0xFFD1D5DB)),
                         shape = RoundedCornerShape(34.dp)
                     )
                     .clip(RoundedCornerShape(34.dp))
-                    .clickable { 
+                    .clickable(enabled = isDateTimeValid) { 
                         onTimeSelected(currentDisplayTime)
                         onDismiss() 
                     },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Lock it in",
+                    text = if (isDateTimeValid) "Lock it in" else "Select future time",
                     style = TextStyle(
                         fontFamily = SatoshiFontFamily,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color.White,
+                        color = if (isDateTimeValid) Color.White else Color(0xFF9CA3AF),
                         letterSpacing = (-0.48).sp
                     )
                 )
