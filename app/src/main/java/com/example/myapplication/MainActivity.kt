@@ -449,43 +449,26 @@ fun TaskAlarmHomeScreen() {
         )
 
         // Header Texts
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 22.dp, top = 35.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(start = 22.dp, top = 35.dp)
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.final_logo),
-                contentDescription = "App Logo",
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .shadow(
-                        elevation = 4.dp,
-                        shape = RoundedCornerShape(12.dp),
-                        spotColor = Color.Black.copy(alpha = 0.25f)
-                    ),
-                contentScale = ContentScale.Fit
+            Text(
+                text = "Task Alarm",
+                fontFamily = DentonFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 36.sp,
+                color = Color(0xFF303030),
             )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = "Task Alarm",
-                    fontFamily = DentonFontFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 36.sp,
-                    color = Color(0xFF303030),
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "Your tasks, your deadlines.",
-                    fontFamily = SatoshiFontFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 12.sp,
-                    color = Color(0xFF6C6C6C),
-                )
-            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Your tasks, your deadlines.",
+                fontFamily = SatoshiFontFamily,
+                fontWeight = FontWeight.Medium,
+                fontSize = 12.sp,
+                color = Color(0xFF6C6C6C),
+            )
         }
 
         // Header Icons
