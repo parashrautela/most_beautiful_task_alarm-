@@ -381,7 +381,7 @@ fun TaskAlarmHomeScreen() {
         // Red line and Vertical Gradient Pill
         Column(
             modifier = Modifier
-                .padding(start = 32.dp, top = 90.dp)
+                .padding(start = 32.dp, top = 372.dp)
                 .width(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -405,11 +405,20 @@ fun TaskAlarmHomeScreen() {
             )
         }
 
+        // 3D Hero Section
+        HomeHeroSection(
+            tasks = tasks,
+            modifier = Modifier
+                .padding(top = 111.dp)
+                .fillMaxWidth()
+                .height(283.dp)
+        )
+
         // Cards Scrollable Area
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 150.dp, start = 84.dp, end = 24.dp)
+                .padding(top = 394.dp, start = 84.dp, end = 24.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
             if (tasks.isEmpty()) {

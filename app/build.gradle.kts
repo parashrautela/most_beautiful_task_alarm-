@@ -57,4 +57,9 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    implementation("io.github.sceneview:sceneview:2.2.1")
+    implementation("com.google.android.filament:filament-android:1.51.4")
+    implementation("com.google.android.filament:gltfio-android:1.51.4")
+    implementation("com.google.android.filament:filament-utils-android:1.51.4")
 }
